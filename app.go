@@ -113,6 +113,8 @@ func (a *App) SelectRepository() (RepoSelection, error) {
 	dir, err := runtime.OpenDirectoryDialog(a.ctx, runtime.OpenDialogOptions{
 		Title:            "リポジトリを選択",
 		DefaultDirectory: a.dir(),
+		// 新しく作ったフォルダーを選べば、そのまま git init するか聞く流れに進む
+		CanCreateDirectories: true,
 	})
 	if err != nil || dir == "" {
 		return RepoSelection{Repo: a.dir()}, err
