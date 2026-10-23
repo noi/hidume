@@ -1,59 +1,793 @@
-#app {
+#App {
+    display: flex;
+    flex-direction: column;
     height: 100vh;
-    text-align: center;
+    text-align: left;
 }
 
-#logo {
-    display: block;
-    width: 50%;
-    height: 50%;
-    margin: auto;
-    padding: 10% 0 0;
-    background-position: center;
-    background-repeat: no-repeat;
-    background-size: 100% 100%;
-    background-origin: content-box;
+.mascot {
+    display: flex;
+    align-items: center;
+    gap: 24px;
+    padding: 12px 24px;
 }
 
-.result {
-    height: 20px;
-    line-height: 20px;
-    margin: 1.5rem auto;
+.mascot-image {
+    width: 64px;
+    height: 64px;
+    image-rendering: pixelated;
 }
 
-.input-box .btn {
-    width: 60px;
-    height: 30px;
-    line-height: 30px;
-    border-radius: 3px;
-    border: none;
-    margin: 0 0 0 20px;
-    padding: 0 8px;
+.speech-bubble {
+    position: relative;
+    animation: pop 0.2s ease-out;
+    padding: 10px 18px;
+    border-radius: 12px;
+    background-color: #ffffff;
+    color: #1b2636;
+    font-size: 1.1rem;
+}
+
+.speech-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 8px;
+}
+
+.speech-actions button {
+    padding: 4px 14px;
+    border: 1px solid #1b2636;
+    border-radius: 4px;
+    background-color: #ffffff;
+    color: #1b2636;
     cursor: pointer;
 }
 
-.input-box .btn:hover {
-    background-image: linear-gradient(to top, #cfd9df 0%, #e2ebf0 100%);
-    color: #333333;
+.speech-actions button:first-child {
+    background-color: #1b2636;
+    color: #ffffff;
 }
 
-.input-box .input {
+.speech-actions button.danger {
+    border-color: #c62828;
+    background-color: #ffffff;
+    color: #c62828;
+}
+
+.speech-actions button:hover:not(:disabled) {
+    opacity: 0.8;
+}
+
+.speech-actions button:disabled {
+    opacity: 0.4;
+    cursor: default;
+}
+
+.speech-bubble.has-input {
+    box-sizing: border-box;
+    width: 560px;
+    max-width: calc(100vw - 360px);
+}
+
+/* セリフが 1 行でも 2 行でも高さが変わらないよう、2 行分を確保する */
+.speech-bubble.has-input .speech-text {
+    min-height: calc(2 * 1.5em);
+    line-height: 1.5;
+}
+
+.speech-input {
+    display: block;
+    box-sizing: border-box;
+    width: 100%;
+    margin-top: 8px;
+    padding: 6px 8px;
+    border: 1px solid #1b2636;
+    border-radius: 4px;
+    font: inherit;
+    font-size: 0.9rem;
+    resize: vertical;
+}
+
+.speech-input:disabled {
+    background-color: #eef0f3;
+}
+
+.speech-select {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 8px;
+    font-size: 0.9rem;
+}
+
+.speech-select select {
+    flex: 1;
+    padding: 4px 6px;
+    border: 1px solid #1b2636;
+    border-radius: 4px;
+    background-color: #ffffff;
+    color: #1b2636;
+    font: inherit;
+}
+
+.speech-option {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 6px;
+    font-size: 0.85rem;
+    cursor: pointer;
+}
+
+.spinner {
+    display: inline-block;
+    width: 0.9em;
+    height: 0.9em;
+    margin-right: 8px;
+    vertical-align: -0.1em;
+    border: 2px solid rgba(27, 38, 54, 0.2);
+    border-top-color: #1b2636;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .spinner {
+        animation-duration: 2.4s;
+    }
+}
+
+@keyframes pop {
+    from {
+        opacity: 0;
+        transform: scale(0.85);
+    }
+}
+
+.speech-bubble::before {
+    content: "";
+    position: absolute;
+    top: 50%;
+    left: -10px;
+    transform: translateY(-50%);
+    border-style: solid;
+    border-width: 8px 10px 8px 0;
+    border-color: transparent #ffffff transparent transparent;
+}
+
+.repo {
+    margin-left: auto;
+    /* 吹き出しが広いときは、リポジトリ名のほうを縮めて省略する */
+    min-width: 0;
+    max-width: 240px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.repo::before {
+    content: "📁 ";
+}
+
+/* 今のブランチ。デフォルトブランチのときは注意の色にする */
+.worktree-menu {
+    position: relative;
+    flex: none;
+}
+
+.branch {
+    max-width: 240px;
+    overflow: hidden;
+    padding: 5px 12px;
+    border: 1px solid rgba(129, 199, 132, 0.6);
+    border-radius: 14px;
+    background: none;
+    color: #81c784;
+    cursor: pointer;
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 0.85rem;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.branch::before {
+    content: "⑂ ";
+}
+
+.branch::after {
+    content: " ▾";
+}
+
+.branch:hover:not(:disabled) {
+    background-color: rgba(129, 199, 132, 0.12);
+}
+
+.branch:disabled {
+    cursor: default;
+}
+
+.worktree-list {
+    position: absolute;
+    top: calc(100% + 6px);
+    right: 0;
+    z-index: 10;
+    width: 420px;
+    max-height: 60vh;
+    overflow: auto;
+    margin: 0;
+    padding: 6px;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 8px;
+    background-color: #24324a;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+    list-style: none;
+}
+
+.worktree-list button {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    width: 100%;
+    padding: 6px 10px;
     border: none;
+    border-radius: 4px;
+    background: none;
+    color: white;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+
+.worktree-list button:hover {
+    background-color: rgba(255, 255, 255, 0.08);
+}
+
+.worktree-list button.current {
+    background-color: rgba(79, 195, 247, 0.18);
+}
+
+.worktree-branch {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 0.85rem;
+}
+
+.worktree-tag {
+    padding: 0 6px;
+    border-radius: 8px;
+    background-color: rgba(255, 255, 255, 0.15);
+    font-family: inherit;
+    font-size: 0.7rem;
+}
+
+.worktree-path {
+    overflow: hidden;
+    color: rgba(255, 255, 255, 0.45);
+    font-size: 0.75rem;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.worktree-list .worktree-create {
+    margin-top: 4px;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 0 0 4px 4px;
+    color: #81c784;
+}
+
+.branch-default {
+    border-color: rgba(255, 183, 77, 0.7);
+    color: #ffb74d;
+}
+
+.repo {
+    padding: 6px 14px;
+    border: none;
+    border-radius: 4px;
+    background-color: rgba(255, 255, 255, 0.12);
+    color: white;
+    cursor: pointer;
+}
+
+.repo:hover {
+    background-color: rgba(255, 255, 255, 0.2);
+}
+
+.error {
+    margin: 0 24px 8px;
+    padding: 8px 12px;
+    border-radius: 4px;
+    background-color: rgba(229, 115, 115, 0.2);
+    color: #ffcdd2;
+    font-size: 0.85rem;
+}
+
+/* 上段: コミット対象外・リモート / 中段: ↑↓・↑(push) / 下段: コミット対象・→・コミットツリー。
+   右端の Claude パネルは上段から下段まで通す */
+.panes {
+    display: grid;
+    grid-template-columns: 300px auto 1fr 400px;
+    grid-template-rows: 1fr auto 1fr;
+    flex: 1;
+    min-height: 0;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.pane {
+    min-height: 0;
+    overflow: auto;
+    padding: 12px 16px;
+}
+
+.pane h2 {
+    margin: 0 0 8px;
+    font-size: 0.85rem;
+    font-weight: normal;
+    color: rgba(255, 255, 255, 0.6);
+}
+
+/* 縦線が全段にまたがるので、各要素の位置は明示する */
+.unstaged-pane {
+    grid-column: 1;
+    grid-row: 1;
+}
+
+.staged-pane {
+    grid-column: 1;
+    grid-row: 3;
+}
+
+/* 上下を仕切る 1 本の線。ボタンは線の上、コミット対象の列の中央に載せる */
+.stage-bar {
+    grid-column: 1 / 4;
+    grid-row: 2;
+    padding: 4px 0;
+    background: linear-gradient(rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.1)) center / 100% 1px no-repeat;
+}
+
+.stage-buttons {
+    display: flex;
+    justify-content: center;
+    gap: 24px;
+    width: 300px;
+}
+
+/* 左右を仕切る縦の線。最上段まで引き、ボタンは下段の線の上に載せる */
+.commit-bar {
+    display: grid;
+    grid-template-rows: subgrid;
+    grid-column: 2;
+    grid-row: 1 / -1;
+    padding: 0 4px;
+    background: linear-gradient(rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.1)) center / 1px 100% no-repeat;
+}
+
+.commit-buttons {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 24px;
+    grid-row: 3;
+}
+
+.remote-pane {
+    grid-column: 3;
+    grid-row: 1;
+    font-size: 0.85rem;
+}
+
+.remote-pane p {
+    margin: 0 0 6px;
+}
+
+.remote-ok {
+    color: #81c784;
+}
+
+.remote-conflict {
+    color: #e57373;
+}
+
+.remote-muted {
+    color: rgba(255, 255, 255, 0.5);
+}
+
+.remote-pr {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+    margin-top: 10px;
+}
+
+.pr-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    padding: 0;
+    border: none;
+    background: none;
+    color: #4fc3f7;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+
+/* 下線は PR のタイトルだけに引き、状態のラベルには引かない */
+.pr-link:hover .pr-title {
+    text-decoration: underline;
+}
+
+.pr-state {
+    flex: none;
+    padding: 1px 8px;
+    border-radius: 10px;
+    font-size: 0.75rem;
+    color: #1b2636;
+}
+
+.pr-open { background-color: #81c784; }
+.pr-draft { background-color: rgba(255, 255, 255, 0.5); }
+.pr-merged { background-color: #ba68c8; }
+.pr-closed { background-color: #e57373; }
+.pr-conflicting { background-color: #e57373; }
+
+.pr-create {
+    padding: 4px 12px;
+    border: none;
+    border-radius: 4px;
+    background-color: rgba(255, 255, 255, 0.12);
+    color: white;
+    cursor: pointer;
+}
+
+.pr-create:hover:not(:disabled) {
+    background-color: rgba(255, 255, 255, 0.2);
+}
+
+.pr-create:disabled {
+    color: rgba(255, 255, 255, 0.3);
+    cursor: default;
+}
+
+.chat-pane {
+    display: flex;
+    flex-direction: column;
+    grid-column: 4;
+    grid-row: 1 / -1;
+    min-height: 0;
+    border-left: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.chat-pane h2 {
+    margin: 0;
+    padding: 12px 16px 8px;
+    overflow: hidden;
+    color: rgba(255, 255, 255, 0.6);
+    font-size: 0.85rem;
+    font-weight: normal;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.chat-messages {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    gap: 8px;
+    min-height: 0;
+    overflow: auto;
+    padding: 0 16px 12px;
+}
+
+.chat-empty {
+    color: rgba(255, 255, 255, 0.4);
+    font-size: 0.85rem;
+}
+
+.chat-message {
+    padding: 8px 10px;
+    border-radius: 8px;
+    font-size: 0.85rem;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+.chat-role {
+    display: block;
+    margin-bottom: 2px;
+    color: rgba(255, 255, 255, 0.5);
+    font-size: 0.75rem;
+}
+
+.chat-user {
+    align-self: flex-end;
+    max-width: 85%;
+    background-color: rgba(79, 195, 247, 0.18);
+}
+
+.chat-assistant {
+    background-color: rgba(255, 255, 255, 0.06);
+}
+
+.chat-tool {
+    padding: 2px 10px;
+    color: rgba(255, 255, 255, 0.5);
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 0.75rem;
+}
+
+.chat-tool::before {
+    content: "🔧 ";
+}
+
+.chat-error {
+    background-color: rgba(229, 115, 115, 0.15);
+    color: #ffcdd2;
+}
+
+.chat-thinking {
+    color: rgba(255, 255, 255, 0.6);
+}
+
+.chat-thinking .spinner {
+    border-color: rgba(255, 255, 255, 0.2);
+    border-top-color: #ffffff;
+}
+
+.chat-input {
+    display: flex;
+    gap: 8px;
+    align-items: flex-end;
+    padding: 10px 16px 14px;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.chat-input textarea {
+    flex: 1;
+    padding: 6px 8px;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 4px;
+    background-color: rgba(255, 255, 255, 0.06);
+    color: white;
+    font: inherit;
+    font-size: 0.85rem;
+    resize: vertical;
+}
+
+.chat-input button {
+    padding: 6px 14px;
+    border: none;
+    border-radius: 4px;
+    background-color: #4fc3f7;
+    color: #1b2636;
+    cursor: pointer;
+}
+
+.chat-input button:disabled {
+    opacity: 0.4;
+    cursor: default;
+}
+
+.chat-input .chat-stop {
+    background-color: #e57373;
+}
+
+.push-bar {
+    display: flex;
+    justify-content: center;
+    gap: 24px;
+    align-items: center;
+    grid-column: 3;
+    grid-row: 2;
+}
+
+.tree-pane {
+    position: relative;
+    display: grid;
+    min-height: 0;
+    grid-column: 3;
+    grid-row: 3;
+}
+
+/* 最後の行がリバートボタンに隠れないよう、下に余白を取る */
+.tree-scroll {
+    padding-bottom: 52px;
+}
+
+/* 線が透けないよう、背景色は不透明にする */
+.stage-bar button,
+.commit-bar button,
+.push-bar button {
+    width: 36px;
+    height: 24px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 4px;
+    background-color: #363f4c;
+    color: white;
+    cursor: pointer;
+}
+
+.stage-bar button:hover:not(:disabled),
+.commit-bar button:hover:not(:disabled),
+.push-bar button:hover:not(:disabled) {
+    background-color: #49515e;
+}
+
+.stage-bar button:disabled,
+.commit-bar button:disabled,
+.push-bar button:disabled {
+    background-color: #1b2636;
+    color: rgba(255, 255, 255, 0.3);
+    cursor: default;
+}
+
+.empty {
+    color: rgba(255, 255, 255, 0.4);
+    font-size: 0.85rem;
+}
+
+.status-list {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    font-size: 0.85rem;
+}
+
+.status-list li {
+    display: flex;
+    gap: 8px;
+    margin: 0 -8px;
+    padding: 3px 8px;
+    border-radius: 4px;
+    cursor: pointer;
+    user-select: none;
+}
+
+.status-list li:hover {
+    background-color: rgba(255, 255, 255, 0.06);
+}
+
+.status-list li.selected {
+    background-color: rgba(79, 195, 247, 0.25);
+}
+
+.status-code {
+    flex: none;
+    width: 1.2em;
+    font-family: ui-monospace, Menlo, monospace;
+    text-align: center;
+}
+
+.status-path {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.status-modified .status-code { color: #ffb74d; }
+.status-added .status-code { color: #81c784; }
+.status-deleted .status-code { color: #e57373; }
+.status-renamed .status-code { color: #4fc3f7; }
+.status-untracked .status-code { color: rgba(255, 255, 255, 0.5); }
+.status-conflict .status-code { color: #f06292; }
+
+.tree {
+    position: relative;
+}
+
+.graph {
+    position: absolute;
+    top: 0;
+    left: 0;
+}
+
+.commit-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 0 6px;
+    border-radius: 4px;
+    font-size: 0.85rem;
+    white-space: nowrap;
+    cursor: pointer;
+    user-select: none;
+}
+
+.commit-row:hover {
+    background-color: rgba(255, 255, 255, 0.06);
+}
+
+/* 今のブランチ以外のコミットは目立たなくする */
+.commit-row.other-branch {
+    color: rgba(255, 255, 255, 0.4);
+}
+
+.commit-row.other-branch .ref,
+.commit-row.other-branch .commit-meta,
+.commit-row.other-branch .commit-hash {
+    opacity: 0.6;
+}
+
+.tree-legend {
+    display: inline-flex;
+    gap: 12px;
+    margin-left: 12px;
+    font-size: 0.75rem;
+}
+
+.tree-legend span {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.commit-row.selected {
+    background-color: rgba(79, 195, 247, 0.25);
+}
+
+/* 下のコミットが透けないよう、背景色は不透明にする */
+.revert-button {
+    position: absolute;
+    right: 16px;
+    bottom: 12px;
+    padding: 6px 14px;
+    border: 1px solid rgba(229, 115, 115, 0.6);
+    border-radius: 4px;
+    background-color: #1b2636;
+    color: #e57373;
+    cursor: pointer;
+}
+
+.revert-button:hover:not(:disabled) {
+    background-color: #3a2e3a;
+}
+
+.revert-button:disabled {
+    border-color: rgba(255, 255, 255, 0.15);
+    color: rgba(255, 255, 255, 0.3);
+    cursor: default;
+}
+
+.commit-subject {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    flex: 1;
+    min-width: 0;
+}
+
+.commit-meta {
+    flex: none;
+    color: rgba(255, 255, 255, 0.5);
+}
+
+.commit-hash {
+    flex: none;
+    font-family: ui-monospace, Menlo, monospace;
+    color: rgba(255, 255, 255, 0.4);
+}
+
+.ref {
+    flex: none;
+    padding: 1px 6px;
     border-radius: 3px;
-    outline: none;
-    height: 30px;
-    line-height: 30px;
-    padding: 0 10px;
-    background-color: rgba(240, 240, 240, 1);
-    -webkit-font-smoothing: antialiased;
+    background-color: rgba(79, 195, 247, 0.2);
+    color: #4fc3f7;
+    font-size: 0.75rem;
 }
 
-.input-box .input:hover {
-    border: none;
-    background-color: rgba(255, 255, 255, 1);
-}
-
-.input-box .input:focus {
-    border: none;
-    background-color: rgba(255, 255, 255, 1);
+.ref-tag {
+    background-color: rgba(255, 241, 118, 0.2);
+    color: #fff176;
 }
