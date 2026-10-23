@@ -30,16 +30,24 @@ export function CreateInitialCommit() {
   return window['go']['main']['App']['CreateInitialCommit']();
 }
 
-export function CreatePullRequest(arg1, arg2, arg3) {
-  return window['go']['main']['App']['CreatePullRequest'](arg1, arg2, arg3);
+export function CreatePullRequest(arg1, arg2, arg3, arg4) {
+  return window['go']['main']['App']['CreatePullRequest'](arg1, arg2, arg3, arg4);
 }
 
 export function FetchBase() {
   return window['go']['main']['App']['FetchBase']();
 }
 
+export function ForcePush(arg1) {
+  return window['go']['main']['App']['ForcePush'](arg1);
+}
+
 export function GenerateCommitMessage(arg1) {
   return window['go']['main']['App']['GenerateCommitMessage'](arg1);
+}
+
+export function GeneratePullRequest(arg1) {
+  return window['go']['main']['App']['GeneratePullRequest'](arg1);
 }
 
 export function GetBranchPrefix() {
@@ -96,6 +104,10 @@ export function MergeBase() {
 
 export function OpenURL(arg1) {
   return window['go']['main']['App']['OpenURL'](arg1);
+}
+
+export function PrepareForcePush() {
+  return window['go']['main']['App']['PrepareForcePush']();
 }
 
 export function Push() {

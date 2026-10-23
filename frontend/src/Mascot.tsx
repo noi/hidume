@@ -1,12 +1,14 @@
 import hidume from './assets/images/hidume.png';
 import hidumeQuestion from './assets/images/hidume_question.png';
 import hidumeLaugh from './assets/images/hidume_laugh.png';
+import hidumeSad from './assets/images/hidume_sad.png';
 import {main} from "../wailsjs/go/models";
 
 const CLEAN = '変更はないよ。ピカピカだね';
 
-// 問いかけているときは疑問符を浮かべ、変更がなくきれいなときは喜ぶ
-function faceFor(speech: string) {
+// エラーを伝えるときは悲しみ、問いかけているときは疑問符を浮かべ、変更がなくきれいなときは喜ぶ
+function faceFor(speech: string, sad: boolean) {
+    if (sad) return hidumeSad;
     if (speech.endsWith('？')) return hidumeQuestion;
     if (speech === CLEAN) return hidumeLaugh;
     return hidume;
@@ -56,6 +58,8 @@ export type SpeechInput = {
     placeholder: string;
     disabled?: boolean;
     singleLine?: boolean;
+    // 複数行のときの高さ。既定は 3 行
+    rows?: number;
     onChange: (value: string) => void;
     onSubmit: () => void;
     onCancel: () => void;
@@ -74,21 +78,25 @@ export type SpeechOption = {
     onChange: (checked: boolean) => void;
 };
 
-export function Mascot({speech, actions, input, option, select, loading}: {
+export function Mascot({speech, actions, inputs, options, select, loading, sad}: {
     speech: string;
     actions: SpeechAction[];
-    input?: SpeechInput;
-    option?: SpeechOption;
+    // 上から順に並べ、最初の欄にフォーカスする
+    inputs: SpeechInput[];
+    options: SpeechOption[];
     select?: SpeechSelect;
     // 待っている間、吹き出しにくるくる回る印を出す
     loading?: boolean;
+    // エラーを伝えているときは悲しい顔にする
+    sad?: boolean;
 }) {
     return (
         <>
-            <img src={faceFor(speech)} className="mascot-image" alt="ヒヅメ"/>
+            <img src={faceFor(speech, !!sad)} className="mascot-image" alt="ヒヅメ"/>
             {/* セリフが変わるたびに吹き出しを作り直して、出てくるアニメーションを流す。
                 入力欄を出している間は、作り直さず大きさも固定して、ガタつかないようにする */}
-            <div key={input ? 'input' : speech} className={`speech-bubble${input ? ' has-input' : ''}`}>
+            <div key={inputs.length > 0 ? 'input' : speech}
+                 className={`speech-bubble${inputs.length > 0 ? ' has-input' : ''}`}>
                 <div className="speech-text">
                     {loading && <span className="spinner" role="status" aria-label="読み込み中"/>}
                     {speech}
@@ -101,18 +109,17 @@ export function Mascot({speech, actions, input, option, select, loading}: {
                         </select>
                     </label>
                 )}
-                {input?.singleLine && (
-                    <input className="speech-input" autoFocus value={input.value} placeholder={input.placeholder}
-                           disabled={input.disabled} spellCheck={false}
+                {inputs.map((input, i) => input.singleLine ? (
+                    <input key={i} className="speech-input" autoFocus={i === 0} value={input.value}
+                           placeholder={input.placeholder} disabled={input.disabled} spellCheck={false}
                            onChange={(e) => input.onChange(e.target.value)}
                            onKeyDown={(e) => {
                                if (e.key === 'Enter' && !e.nativeEvent.isComposing) input.onSubmit();
                                if (e.key === 'Escape') input.onCancel();
                            }}/>
-                )}
-                {input && !input.singleLine && (
-                    <textarea className="speech-input" autoFocus rows={3} value={input.value}
-                              placeholder={input.placeholder} disabled={input.disabled}
+                ) : (
+                    <textarea key={i} className="speech-input" autoFocus={i === 0} rows={input.rows ?? 3}
+                              value={input.value} placeholder={input.placeholder} disabled={input.disabled}
                               onChange={(e) => input.onChange(e.target.value)}
                               onKeyDown={(e) => {
                                   if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && !e.nativeEvent.isComposing) {
@@ -120,14 +127,14 @@ export function Mascot({speech, actions, input, option, select, loading}: {
                                   }
                                   if (e.key === 'Escape') input.onCancel();
                               }}/>
-                )}
-                {option && (
-                    <label className="speech-option">
+                ))}
+                {options.map((option) => (
+                    <label key={option.label} className="speech-option">
                         <input type="checkbox" checked={option.checked}
                                onChange={(e) => option.onChange(e.target.checked)}/>
                         {option.label}
                     </label>
-                )}
+                ))}
                 {actions.length > 0 && (
                     <div className="speech-actions">
                         {actions.map((a) => (

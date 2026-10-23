@@ -48,11 +48,11 @@ func (a *App) GenerateCommitMessage(all bool) (string, error) {
 	input.WriteString("<recent_commits>\n" + escapeTags(recent) + "</recent_commits>\n\n")
 	input.WriteString("<changes>\n" + escapeTags(changes) + "\n</changes>\n")
 
-	out, err := runClaude(input.String())
+	out, err := runClaude(commitMessageSystemPrompt, input.String())
 	if err != nil {
 		return "", err
 	}
-	message := sanitizeMessage(out)
+	message := sanitizeMessage(out, maxMessageLines, maxMessageRunes)
 	if message == "" {
 		return "", fmt.Errorf("Claude からメッセージが返ってきませんでした")
 	}
@@ -107,10 +107,10 @@ func escapeTags(s string) string {
 	return strings.ReplaceAll(s, ">", "＞")
 }
 
-// runClaude は Claude Code を非対話モードで 1 回だけ呼ぶ。
+// runClaude は Claude Code を systemPrompt 付きの非対話モードで 1 回だけ呼ぶ。
 // ツールと MCP サーバーを全部外し、空の一時ディレクトリで動かすので、
 // 入力にどんな指示が紛れ込んでいてもファイルの読み書きやコマンド実行はできない
-func runClaude(input string) (string, error) {
+func runClaude(systemPrompt, input string) (string, error) {
 	dir, err := os.MkdirTemp("", "hidume-claude-")
 	if err != nil {
 		return "", err
@@ -127,7 +127,7 @@ func runClaude(input string) (string, error) {
 		"--strict-mcp-config",
 		"--no-session-persistence",
 		"--output-format", "text",
-		"--system-prompt", commitMessageSystemPrompt,
+		"--system-prompt", systemPrompt,
 	)
 	cmd.Dir = dir
 	cmd.Stdin = strings.NewReader(input)
@@ -145,9 +145,9 @@ func runClaude(input string) (string, error) {
 	return stdout.String(), nil
 }
 
-// sanitizeMessage は Claude の出力をコミットメッセージとして使える形に整える。
-// 制御文字を落とし、コードブロックの囲みを外し、長さを制限する
-func sanitizeMessage(s string) string {
+// sanitizeMessage は Claude の出力をコミットメッセージや PR の文面として使える形に整える。
+// 制御文字を落とし、コードブロックの囲みを外し、maxLines 行・maxRunes 文字までに制限する
+func sanitizeMessage(s string, maxLines, maxRunes int) string {
 	s = strings.Map(func(r rune) rune {
 		if r == '\n' || r == '\t' {
 			return r
@@ -165,12 +165,12 @@ func sanitizeMessage(s string) string {
 		}
 		lines = append(lines, strings.TrimRight(line, " \t"))
 	}
-	if len(lines) > maxMessageLines {
-		lines = lines[:maxMessageLines]
+	if len(lines) > maxLines {
+		lines = lines[:maxLines]
 	}
 	message := strings.TrimSpace(strings.Join(lines, "\n"))
-	if runes := []rune(message); len(runes) > maxMessageRunes {
-		message = strings.TrimSpace(string(runes[:maxMessageRunes]))
+	if runes := []rune(message); len(runes) > maxRunes {
+		message = strings.TrimSpace(string(runes[:maxRunes]))
 	}
 	return message
 }

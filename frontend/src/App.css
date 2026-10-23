@@ -303,12 +303,31 @@
 }
 
 .error {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
     margin: 0 24px 8px;
     padding: 8px 12px;
     border-radius: 4px;
     background-color: rgba(229, 115, 115, 0.2);
     color: #ffcdd2;
     font-size: 0.85rem;
+}
+
+.error > span {
+    flex: 1;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.error-close {
+    padding: 0 4px;
+    border: none;
+    background: none;
+    color: inherit;
+    font-size: 1rem;
+    line-height: 1;
+    cursor: pointer;
 }
 
 /* 上段: コミット対象外・リモート / 中段: ↑↓・↑(push) / 下段: コミット対象・→・コミットツリー。

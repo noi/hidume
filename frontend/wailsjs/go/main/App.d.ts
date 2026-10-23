@@ -16,11 +16,15 @@ export function CreateGitHubRepository(arg1:string,arg2:string,arg3:string):Prom
 
 export function CreateInitialCommit():Promise<void>;
 
-export function CreatePullRequest(arg1:string,arg2:string,arg3:boolean):Promise<string>;
+export function CreatePullRequest(arg1:string,arg2:string,arg3:string,arg4:boolean):Promise<string>;
 
 export function FetchBase():Promise<void>;
 
+export function ForcePush(arg1:string):Promise<void>;
+
 export function GenerateCommitMessage(arg1:boolean):Promise<string>;
+
+export function GeneratePullRequest(arg1:string):Promise<string>;
 
 export function GetBranchPrefix():Promise<string>;
 
@@ -49,6 +53,8 @@ export function ListWorktrees():Promise<Array<main.Worktree>>;
 export function MergeBase():Promise<boolean>;
 
 export function OpenURL(arg1:string):Promise<void>;
+
+export function PrepareForcePush():Promise<main.ForcePushPlan>;
 
 export function Push():Promise<void>;
 
