@@ -6,6 +6,10 @@ export function AbortMerge() {
   return window['go']['main']['App']['AbortMerge']();
 }
 
+export function AddToGitignore(arg1) {
+  return window['go']['main']['App']['AddToGitignore'](arg1);
+}
+
 export function ClearRepository() {
   return window['go']['main']['App']['ClearRepository']();
 }

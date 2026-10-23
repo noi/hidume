@@ -4,6 +4,8 @@ import {main} from '../models';
 
 export function AbortMerge():Promise<void>;
 
+export function AddToGitignore(arg1:Array<string>):Promise<void>;
+
 export function ClearRepository():Promise<void>;
 
 export function Commit(arg1:string):Promise<void>;

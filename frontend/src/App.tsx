@@ -2,6 +2,7 @@ import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import './App.css';
 import {
     AbortMerge,
+    AddToGitignore,
     Commit,
     ContinueMerge,
     ClearRepository,
@@ -46,6 +47,7 @@ import {main} from "../wailsjs/go/models";
 import {EventsOn} from "../wailsjs/runtime/runtime";
 import {layoutGraph} from "./commitGraph";
 import {ChatPane} from "./ChatPane";
+import {isSecretFile} from "./secrets";
 import {describeError, describeStatus, Mascot, SpeechAction, SpeechInput, SpeechOption, SpeechSelect} from "./Mascot";
 
 const COMMIT_LIMIT = 300;
@@ -77,6 +79,15 @@ type CommitDraft = {
     message: string;
     // Claude が書いたメッセージが入っているか
     byClaude: boolean;
+};
+
+// コミットしようとしたものに、秘密の情報が入っていそうなファイルがあったとき
+type SecretCheck = {
+    // 全ファイルの変更をコミットしようとしていたか
+    all: boolean;
+    paths: string[];
+    // すでに git で追跡しているファイルがあるか。あると .gitignore に足しても効かない
+    tracked: boolean;
 };
 
 // push の確認と、origin がないときの設定の流れ
@@ -222,6 +233,7 @@ function App() {
     // git init するか聞いているディレクトリ
     const [initDir, setInitDir] = useState<string | null>(null);
     const [draft, setDraft] = useState<CommitDraft | null>(null);
+    const [secretCheck, setSecretCheck] = useState<SecretCheck | null>(null);
     const [autoClaude, setAutoClaude] = useState(loadAutoClaude);
     const [generating, setGenerating] = useState(false);
     // 古い生成結果で、開き直した入力欄を上書きしないための番号
@@ -302,6 +314,7 @@ function App() {
         setPushFlow(null);
         closePrDraft();
         setBranchDraft(null);
+        setSecretCheck(null);
         setReaction(message);
         refresh();
     };
@@ -450,10 +463,47 @@ function App() {
             });
     };
 
-    const openDraft = (all: boolean) => {
+    // コミットするファイルに秘密の情報が入っていそうなものがあれば、メッセージを聞く前に止める。
+    // checked は確かめ済み（外した後や、そのままコミットすると答えた後）のとき
+    const openDraft = (all: boolean, checked = false) => {
+        if (!checked) {
+            // 消すだけの変更は中身をコミットしないので気にしない
+            const files = status.filter((e) => e.index !== 'D' && (all ? e.workTree !== 'D' : e.index !== ' ' && e.index !== '?'));
+            const secrets = files.filter((e) => isSecretFile(e.path));
+            if (secrets.length > 0) {
+                setSecretCheck({
+                    all,
+                    paths: secrets.map((e) => e.path),
+                    tracked: secrets.some((e) => e.index !== '?' && e.index !== 'A'),
+                });
+                return;
+            }
+        }
         setDraft({all, message: '', byClaude: false});
         if (autoClaude) writeWithClaude(all);
         else setGenerating(false);
+    };
+
+    // 秘密の情報が入っていそうなファイルをコミット対象から外し、残りをコミットする流れに進む。
+    // ignore なら .gitignore にも足し、その .gitignore の変更もコミット対象にする
+    const excludeSecrets = (c: SecretCheck, ignore: boolean) => {
+        setSecretCheck(null);
+        // 全ファイルをコミットするときは、先に全部をコミット対象にしてから外す
+        (c.all ? StageAll() : Promise.resolve())
+            .then(() => Unstage(c.paths))
+            .then(() => ignore ? AddToGitignore(c.paths).then(() => Stage(['.gitignore'])) : undefined)
+            .then(() => GetStatus())
+            .then((entries) => {
+                if (entries.some((e) => e.index !== ' ' && e.index !== '?')) {
+                    setStatus(entries);
+                    openDraft(false, true);
+                } else {
+                    setReaction(ignore ? '.gitignore に足して外したよ。ほかにコミットするものはないみたい'
+                        : '外したら、コミットするものがなくなったよ');
+                }
+            })
+            .catch(onError)
+            .finally(refresh);
     };
 
     const closeDraft = () => {
@@ -1046,6 +1096,21 @@ ${fence}
         actions = [
             {label: '戻す', onClick: runRevert},
             {label: 'やめる', onClick: () => setConfirmingRevert(false)},
+        ];
+    } else if (secretCheck) {
+        const c = secretCheck;
+        const names = c.paths.slice(0, 3).map(baseName).join('、') + (c.paths.length > 3 ? ` ほか ${c.paths.length - 3} 件` : '');
+        speech = `${names} は、パスワードや鍵みたいな秘密の情報が入っていそうなファイルだよ。コミットから外す？`;
+        actions = [
+            {label: '外してコミット', onClick: () => excludeSecrets(c, false)},
+            ...(c.tracked ? [] : [{label: '.gitignore に足して外す', onClick: () => excludeSecrets(c, true)}]),
+            {
+                label: 'そのままコミット', danger: true, onClick: () => {
+                    setSecretCheck(null);
+                    openDraft(c.all, true);
+                },
+            },
+            {label: 'やめる', onClick: () => setSecretCheck(null)},
         ];
     } else if (draft) {
         const target = draft.all ? `全部の変更（${status.length} 件）` : `コミット対象（${stagedCount} 件）`;
