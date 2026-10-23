@@ -203,12 +203,12 @@ const SETUP_ITEMS: Record<string, SetupItem> = {
 // ターミナルでやっていることが終わったかを確かめる間隔
 const SETUP_POLL_MS = 3000;
 
-// 「常に Claude に書かせる」はこの端末だけの設定なので localStorage に置く
+// 「常に Claude に書かせる」はこの端末だけの設定なので localStorage に置く。外したことがなければオン
 function loadAutoClaude() {
     try {
-        return localStorage.getItem(AUTO_CLAUDE_KEY) === '1';
+        return localStorage.getItem(AUTO_CLAUDE_KEY) !== '0';
     } catch {
-        return false;
+        return true;
     }
 }
 
