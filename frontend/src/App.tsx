@@ -44,7 +44,7 @@ import {
     Unstage
 } from "../wailsjs/go/main/App";
 import {main} from "../wailsjs/go/models";
-import {EventsOn} from "../wailsjs/runtime/runtime";
+import {ClipboardSetText, EventsOn} from "../wailsjs/runtime/runtime";
 import {layoutGraph} from "./commitGraph";
 import {ChatPane} from "./ChatPane";
 import {isSecretFile} from "./secrets";
@@ -336,6 +336,13 @@ function App() {
                 setConfirmingMerge(false);
                 switchTo('', 'リポジトリを閉じたよ');
             })
+            .catch(onError);
+    };
+
+    const copyRepositoryPath = () => {
+        if (!repo) return;
+        ClipboardSetText(repo)
+            .then((ok) => ok ? setReaction('パスをコピーしたよ') : onError('クリップボードにコピーできませんでした'))
             .catch(onError);
     };
 
@@ -1244,19 +1251,33 @@ ${fence}
                             || (pushFlow?.step === 'force' && !pushFlow.plan)
                             || (prDraft !== null && (!prDraft.bases || generating))
                             || (branchDraft !== null && !branchDraft.prefix)}/>
-                {/* リポジトリの選択とクリアは、1 つのボタンに見えるようにまとめる */}
-                <div className="repo-group">
-                    <button className="repo" title={repo ?? undefined} onClick={selectRepository}>
-                        {repo ? repo.split('/').pop() : 'リポジトリを選択'}
-                    </button>
+                {/* 右端は 2 段にして、作業ディレクトリのパスもマスコットの高さの中に収める */}
+                <div className="header-side">
+                    <div className="header-buttons">
+                        {/* リポジトリの選択とクリアは、1 つのボタンに見えるようにまとめる */}
+                        <div className="repo-group">
+                            <button className="repo" title={repo ?? undefined} onClick={selectRepository}>
+                                {repo ? repo.split('/').pop() : 'リポジトリを選択'}
+                            </button>
+                            {repo && (
+                                <button className="repo-clear" title="リポジトリの選択をクリア" disabled={busy !== null}
+                                        onClick={clearRepository}>×</button>
+                            )}
+                        </div>
+                        <WorktreeMenu branch={branch || (pushStatus ? 'ブランチなし' : '…')} onDefault={onDefault}
+                                      defaultBranch={pushStatus?.defaultBranch ?? ''}
+                                      disabled={!repo || unborn || busy !== null}
+                                      onSwitch={switchWorktree} onCreate={startBranch} onError={onError}/>
+                    </div>
+                    {/* 開いている作業ディレクトリ（ワークツリー）のフルパス */}
                     {repo && (
-                        <button className="repo-clear" title="リポジトリの選択をクリア" disabled={busy !== null}
-                                onClick={clearRepository}>×</button>
+                        <div className="workdir">
+                            <span className="workdir-path" title={repo}>{repo}</span>
+                            <button className="workdir-copy" title="パスをクリップボードにコピー"
+                                    onClick={copyRepositoryPath}>コピー</button>
+                        </div>
                     )}
                 </div>
-                <WorktreeMenu branch={branch || (pushStatus ? 'ブランチなし' : '…')} onDefault={onDefault}
-                              defaultBranch={pushStatus?.defaultBranch ?? ''} disabled={!repo || unborn || busy !== null}
-                              onSwitch={switchWorktree} onCreate={startBranch} onError={onError}/>
             </header>
             {/* セットアップ中は、git がないことによる読み込みの失敗は出さない */}
             {(error || (!setup && loadError)) && (

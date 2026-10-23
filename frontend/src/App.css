@@ -162,9 +162,26 @@
     border-color: transparent #ffffff transparent transparent;
 }
 
+/* ヘッダーの右端。上段にリポジトリとブランチのボタン、下段に作業ディレクトリのパス */
+.header-side {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 6px;
+    margin-left: auto;
+    /* 吹き出しが広いときは、こちらを縮めて省略する */
+    min-width: 0;
+}
+
+.header-buttons {
+    display: flex;
+    align-items: center;
+    gap: 24px;
+    max-width: 100%;
+}
+
 .repo-group {
     display: flex;
-    margin-left: auto;
     /* 吹き出しが広いときは、リポジトリ名のほうを縮めて省略する */
     min-width: 0;
     overflow: hidden;
@@ -328,6 +345,43 @@
 .repo-clear:disabled {
     opacity: 0.4;
     cursor: default;
+}
+
+/* ヘッダーの下に出す、作業ディレクトリのパス */
+.workdir {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    /* 長いパスで右端が広がって、吹き出しを押しのけないようにする */
+    max-width: min(100%, 420px);
+    color: rgba(255, 255, 255, 0.6);
+    font-size: 0.8rem;
+}
+
+.workdir-path {
+    min-width: 0;
+    overflow: hidden;
+    font-family: ui-monospace, Menlo, monospace;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    /* ダブルクリックなどで選んで、そのままコピーもできるようにする */
+    user-select: text;
+}
+
+.workdir-copy {
+    flex: none;
+    padding: 2px 8px;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 4px;
+    background: none;
+    color: inherit;
+    font-size: 0.75rem;
+    cursor: pointer;
+}
+
+.workdir-copy:hover {
+    background-color: rgba(255, 255, 255, 0.1);
+    color: white;
 }
 
 .error {
