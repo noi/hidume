@@ -14,6 +14,10 @@ export function CommitAll(arg1) {
   return window['go']['main']['App']['CommitAll'](arg1);
 }
 
+export function CompleteSetup() {
+  return window['go']['main']['App']['CompleteSetup']();
+}
+
 export function ContinueMerge() {
   return window['go']['main']['App']['ContinueMerge']();
 }
@@ -86,12 +90,20 @@ export function GetRepository() {
   return window['go']['main']['App']['GetRepository']();
 }
 
+export function GetSetup() {
+  return window['go']['main']['App']['GetSetup']();
+}
+
 export function GetStatus() {
   return window['go']['main']['App']['GetStatus']();
 }
 
 export function InitRepository(arg1) {
   return window['go']['main']['App']['InitRepository'](arg1);
+}
+
+export function InstallTool(arg1) {
+  return window['go']['main']['App']['InstallTool'](arg1);
 }
 
 export function ListWorktrees() {

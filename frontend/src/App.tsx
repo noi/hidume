@@ -5,6 +5,7 @@ import {
     Commit,
     ContinueMerge,
     CommitAll,
+    CompleteSetup,
     CreateBranch,
     CreateInitialCommit,
     CreateGitHubRepository,
@@ -21,9 +22,11 @@ import {
     GetPullRequestDefaults,
     GetPushStatus,
     GetRepository,
+    GetSetup,
     GetStatus,
     PrepareForcePush,
     InitRepository,
+    InstallTool,
     ListWorktrees,
     MergeBase,
     OpenURL,
@@ -120,6 +123,73 @@ type PullRequestState = {
 
 const AUTO_CLAUDE_KEY = 'hidume.autoClaude';
 
+// 初回のセットアップ。hello はヒヅメくんの自己紹介、tools は足りない道具やログインを順に済ませているところ
+type SetupFlow = {
+    step: 'hello' | 'tools';
+    status: main.SetupStatus;
+    // 「あとで」にしたもの
+    skipped: string[];
+    // ターミナルで終わるのを待っているもの
+    waiting: string | null;
+    // 直前に済んだことを伝えるセリフ
+    done: string | null;
+};
+
+type SetupItem = {
+    label: string;
+    // まだのときに、やってよいか聞くセリフ
+    ask: string;
+    done: string;
+    // ターミナルでやるものは、待っている間のセリフ
+    waiting?: string;
+    // 先に済ませておく必要があるもの
+    needs?: string;
+};
+
+const SETUP_ITEMS: Record<string, SetupItem> = {
+    brew: {
+        label: 'Homebrew',
+        ask: 'Homebrew がまだないみたい。Mac にいろんな道具を入れるための道具だよ。ターミナルが開くから、そこでインストールしてね。入れていい？',
+        done: 'Homebrew を入れたよ！',
+        waiting: 'ターミナルで Homebrew を入れてるよ。パスワードを聞かれたら Mac のログインパスワードを入れてね'
+            + '（打っても画面には出ないよ）。終わったら教えてね',
+    },
+    git: {
+        label: 'git',
+        ask: 'git がまだないみたい。ファイルの変更を記録する道具で、ぼくはこれを使って働くんだ。入れていい？',
+        done: 'git を入れたよ！',
+        needs: 'brew',
+    },
+    gh: {
+        label: 'GitHub CLI（gh）',
+        ask: 'GitHub CLI（gh）がまだないみたい。GitHub にリポジトリや PR を作るのに使うよ。入れていい？',
+        done: 'GitHub CLI（gh）を入れたよ！',
+        needs: 'brew',
+    },
+    'gh-auth': {
+        label: 'GitHub へのログイン',
+        ask: 'GitHub にまだログインしてないみたい。ターミナルが開くから、そこでログインしてね。ログインする？',
+        done: 'GitHub にログインできたよ！',
+        waiting: 'ターミナルで GitHub にログインしてるよ。表示されたコードを、開いたブラウザに入れてね。終わったら教えてね',
+        needs: 'gh',
+    },
+    claude: {
+        label: 'Claude Code',
+        ask: 'Claude Code がまだないみたい。コミットメッセージを書いたり、コンフリクトを解消したりしてくれる AI だよ。入れていい？',
+        done: 'Claude Code を入れたよ！',
+        needs: 'brew',
+    },
+    'claude-auth': {
+        label: 'Claude へのログイン',
+        ask: 'Claude にまだログインしてないみたい。ターミナルが開くから、そこでログインしてね。ログインする？',
+        done: 'Claude にログインできたよ！',
+        waiting: 'ターミナルで Claude にログインしてるよ。開いたブラウザで、Claude のアカウントでログインしてね。終わったら教えてね',
+        needs: 'claude',
+    },
+};
+// ターミナルでやっていることが終わったかを確かめる間隔
+const SETUP_POLL_MS = 3000;
+
 // 「常に Claude に書かせる」はこの端末だけの設定なので localStorage に置く
 function loadAutoClaude() {
     try {
@@ -169,6 +239,7 @@ function App() {
     const [delegatedMerge, setDelegatedMerge] = useState(false);
     // push など時間のかかる操作の最中に、ヒヅメくんが言うこと
     const [busy, setBusy] = useState<string | null>(null);
+    const [setup, setSetup] = useState<SetupFlow | null>(null);
 
     useEffect(() => {
         if (!reaction) return;
@@ -232,6 +303,47 @@ function App() {
         InitRepository(dir)
             .then((root) => switchTo(root, `${baseName(root)} で git init したよ！`))
             .catch(onError);
+    };
+
+    // 済んだかを確かめ直す。ターミナルでやっていたことが済んでいたら待つのをやめる
+    const checkSetup = (done?: string) => GetSetup()
+        .then((status) => setSetup((s) => {
+            if (s?.step !== 'tools') return s;
+            if (s.waiting && status.tools.find((t) => t.name === s.waiting)?.installed) {
+                return {...s, status, waiting: null, done: SETUP_ITEMS[s.waiting].done};
+            }
+            return {...s, status, done: done ?? s.done};
+        }))
+        .catch(onError);
+
+    // パスワードやブラウザでの操作が要るものはターミナルで始め、ほかは brew で入れ終わるまで待つ
+    const installTool = (name: string) => {
+        const item = SETUP_ITEMS[name];
+        setError('');
+        if (item.waiting) {
+            InstallTool(name)
+                .then(() => setSetup((s) => s && {...s, waiting: name, done: null}))
+                .catch(onError);
+            return;
+        }
+        setBusy(`${item.label} を入れてるよ…（数分かかることもあるよ）`);
+        InstallTool(name)
+            .then(() => checkSetup(item.done))
+            .catch(onError)
+            .finally(() => setBusy(null));
+    };
+
+    const skipTool = (name: string) => {
+        setError('');
+        setSetup((s) => s && {...s, skipped: [...s.skipped, name], waiting: null, done: null});
+    };
+
+    const finishSetup = () => {
+        CompleteSetup().catch(onError);
+        setSetup(null);
+        setReaction('準備ができたよ！ これからよろしくね');
+        // git がなくて読めていなかった情報を読み直す
+        refresh();
     };
 
     const stageAll = () => {
@@ -644,7 +756,48 @@ ${fence}
         },
     };
     let select: SpeechSelect | undefined;
-    if (initDir) {
+    if (setup?.step === 'hello') {
+        speech = 'はじめまして！ ぼくはヒヅメ。きみの git の作業をとなりで手伝うよ。まずは、ぼくが働くのに必要な道具をそろえよう！';
+        actions = [{label: 'よろしくね！', onClick: () => setSetup({...setup, step: 'tools'})}];
+    } else if (setup) {
+        const missing = setup.status.tools.filter((t) => !t.installed);
+        const tool = missing.find((t) => !setup.skipped.includes(t.name));
+        const done = setup.done ? `${setup.done} ` : '';
+        const item = tool && SETUP_ITEMS[tool.name];
+        const needs = item?.needs && missing.some((t) => t.name === item.needs) ? SETUP_ITEMS[item.needs] : null;
+        if (busy) {
+            speech = busy;
+        } else if (!tool || !item) {
+            const later = missing.map((t) => SETUP_ITEMS[t.name].label).join('、');
+            speech = done + (later
+                ? `${later}はあとでやってね。それじゃあ、さっそく使ってみよう！`
+                : '準備は全部そろってるよ。さっそく使ってみよう！');
+            actions = [{label: 'はじめる', onClick: finishSetup}];
+        } else if (error) {
+            speech = `${item.label}がうまくいかなかった… もう一度やってみる？`;
+            sad = true;
+            actions = [
+                {label: 'もう一度', onClick: () => installTool(tool.name)},
+                {label: 'あとで', onClick: () => skipTool(tool.name)},
+            ];
+        } else if (setup.waiting === tool.name && item.waiting) {
+            speech = item.waiting;
+            actions = [
+                {label: '終わった', onClick: () => checkSetup()},
+                {label: 'あとで', onClick: () => skipTool(tool.name)},
+            ];
+        } else if (needs) {
+            speech = `${item.label}には ${needs.label} が要るんだけど、まだないから今はできないよ。あとでやってね`;
+            actions = [{label: '次へ', onClick: () => skipTool(tool.name)}];
+        } else {
+            const login = tool.name.endsWith('-auth');
+            speech = done + item.ask;
+            actions = [
+                {label: login ? 'ログインする' : '入れる', onClick: () => installTool(tool.name)},
+                {label: 'あとで', onClick: () => skipTool(tool.name)},
+            ];
+        }
+    } else if (initDir) {
         speech = `${baseName(initDir)} は git リポジトリじゃないよ。git init する？`;
         actions = [
             {label: 'する', onClick: () => initRepository(initDir)},
@@ -935,6 +1088,23 @@ ${fence}
         actions = next?.actions ?? [];
     }
 
+    // セットアップを終えていなければ、ヒヅメくんの自己紹介から始める
+    useEffect(() => {
+        GetSetup()
+            .then((status) => {
+                if (!status.done) setSetup({step: 'hello', status, skipped: [], waiting: null, done: null});
+            })
+            .catch(onError);
+    }, []);
+
+    // ターミナルでやっている間は、済んだかを定期的に確かめる
+    const waitingTerminal = setup?.waiting ?? null;
+    useEffect(() => {
+        if (!waitingTerminal) return;
+        const timer = setInterval(() => checkSetup(), SETUP_POLL_MS);
+        return () => clearInterval(timer);
+    }, [waitingTerminal]);
+
     // ローカルの変化は Go 側の監視が知らせてくる。PR は定期的に、ウィンドウに戻ったときにも確認する
     useEffect(() => {
         GetRepository().then(setRepo);
@@ -973,7 +1143,8 @@ ${fence}
                               defaultBranch={pushStatus?.defaultBranch ?? ''} disabled={unborn || busy !== null}
                               onSwitch={switchWorktree} onCreate={startBranch} onError={onError}/>
             </header>
-            {(error || loadError) && (
+            {/* セットアップ中は、git がないことによる読み込みの失敗は出さない */}
+            {(error || (!setup && loadError)) && (
                 <div className="error">
                     <span>{error || loadError}</span>
                     {error && <button className="error-close" title="閉じる" onClick={() => setError('')}>×</button>}

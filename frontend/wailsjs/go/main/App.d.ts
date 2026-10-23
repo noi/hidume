@@ -8,6 +8,8 @@ export function Commit(arg1:string):Promise<void>;
 
 export function CommitAll(arg1:string):Promise<void>;
 
+export function CompleteSetup():Promise<void>;
+
 export function ContinueMerge():Promise<void>;
 
 export function CreateBranch(arg1:string,arg2:boolean):Promise<string>;
@@ -44,9 +46,13 @@ export function GetPushStatus():Promise<main.PushStatus>;
 
 export function GetRepository():Promise<string>;
 
+export function GetSetup():Promise<main.SetupStatus>;
+
 export function GetStatus():Promise<Array<main.StatusEntry>>;
 
 export function InitRepository(arg1:string):Promise<string>;
+
+export function InstallTool(arg1:string):Promise<void>;
 
 export function ListWorktrees():Promise<Array<main.Worktree>>;
 
