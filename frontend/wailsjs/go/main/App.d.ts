@@ -22,7 +22,7 @@ export function CreateInitialCommit():Promise<void>;
 
 export function CreatePullRequest(arg1:string,arg2:string,arg3:string,arg4:boolean):Promise<string>;
 
-export function FetchBase():Promise<void>;
+export function FetchRemote():Promise<void>;
 
 export function ForcePush(arg1:string):Promise<void>;
 
@@ -63,6 +63,8 @@ export function MergeBase():Promise<boolean>;
 export function OpenURL(arg1:string):Promise<void>;
 
 export function PrepareForcePush():Promise<main.ForcePushPlan>;
+
+export function PullUpstream():Promise<void>;
 
 export function Push():Promise<void>;
 

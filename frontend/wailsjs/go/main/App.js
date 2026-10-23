@@ -42,8 +42,8 @@ export function CreatePullRequest(arg1, arg2, arg3, arg4) {
   return window['go']['main']['App']['CreatePullRequest'](arg1, arg2, arg3, arg4);
 }
 
-export function FetchBase() {
-  return window['go']['main']['App']['FetchBase']();
+export function FetchRemote() {
+  return window['go']['main']['App']['FetchRemote']();
 }
 
 export function ForcePush(arg1) {
@@ -124,6 +124,10 @@ export function OpenURL(arg1) {
 
 export function PrepareForcePush() {
   return window['go']['main']['App']['PrepareForcePush']();
+}
+
+export function PullUpstream() {
+  return window['go']['main']['App']['PullUpstream']();
 }
 
 export function Push() {

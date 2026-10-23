@@ -11,7 +11,7 @@ import {
     CreateInitialCommit,
     CreateGitHubRepository,
     CreatePullRequest,
-    FetchBase,
+    FetchRemote,
     ForcePush,
     GenerateCommitMessage,
     GeneratePullRequest,
@@ -31,6 +31,7 @@ import {
     ListWorktrees,
     MergeBase,
     OpenURL,
+    PullUpstream,
     Push,
     RevertTo,
     SelectRepository,
@@ -615,6 +616,12 @@ function App() {
                 : upToDate ? `origin/${base} の最新は取り込み済みです`
                     : `origin/${base} の新しいコミット ${mergeStatus?.behind} 件をマージコミットで取り込む`;
 
+    // 追跡しているリモートブランチにだけ新しいコミットがあれば、早送りで取り込める（pull）。
+    // 手元にしかないコミットもあるとき（diverged）は、フォースプッシュかマージの案内に任せる
+    const upstream = pushStatus?.upstream ?? '';
+    const canPull = !!upstream && pushStatus!.behind > 0 && pushStatus!.ahead === 0 && !busy && !mergeStatus?.merging;
+    const runPull = () => runBusy([[`${upstream} を取り込んでるよ…`, PullUpstream]], `${upstream} の新しいコミットを取り込んだよ！`);
+
     // delegate が true なら、コンフリクトしたときにそのまま Claude パネルへ解消を頼む
     const runMerge = (delegate = false) => {
         setConfirmingMerge(false);
@@ -698,6 +705,13 @@ ${fence}
     // 作業中の変更がないときに勧める、次の一手
     const nextStep = (): { text: string; actions: SpeechAction[] } | null => {
         if (!pushStatus?.branch || onDefault || unborn) return null;
+        // 同じブランチへのほかの人（ほかの Mac）のコミットを先に取り込まないと、プッシュが断られる
+        if (canPull) {
+            return {
+                text: `${upstream} に新しいコミットが ${pushStatus.behind} 件あるよ。取り込む？`,
+                actions: [{label: '取り込む', onClick: runPull}],
+            };
+        }
         const pr = pullRequest.value;
         const behind = mergeStatus?.behind ?? 0;
         // ベースブランチがわからないときは、差分があるものとして扱う
@@ -1138,10 +1152,10 @@ ${fence}
     // ローカルの変化は Go 側の監視が知らせてくる。PR は定期的に、ウィンドウに戻ったときにも確認する
     useEffect(() => {
         refresh();
-        // ベースブランチも同じ間隔で fetch する。取ってきた変化は Go 側の監視が知らせてくる
+        // ベースブランチと今のブランチの追跡先も同じ間隔で fetch する。取ってきた変化は Go 側の監視が知らせてくる
         const pollRemote = () => {
             loadPullRequest();
-            FetchBase().catch(() => {
+            FetchRemote().catch(() => {
                 // オフラインなどで取れなくても、前回の情報のまま表示を続ける
             });
         };
@@ -1201,7 +1215,12 @@ ${fence}
                 {/* コミットツリーの上の線に載せ、コミットを上（リモート）へ送るボタン */}
                 <div className="push-bar">
                     <button title={pushTitle} disabled={!canPush} onClick={startPush}>↑</button>
-                    <button title={mergeTitle} disabled={!canMerge} onClick={() => setConfirmingMerge(true)}>↓</button>
+                    {/* 追跡しているリモートブランチを取り込めるならそちらを先に、なければベースブランチを取り込む */}
+                    {canPull
+                        ? <button title={`${upstream} の新しいコミット ${pushStatus?.behind} 件を取り込む`}
+                                  onClick={runPull}>↓</button>
+                        : <button title={mergeTitle} disabled={!canMerge}
+                                  onClick={() => setConfirmingMerge(true)}>↓</button>}
                 </div>
                 <ChatPane repo={repo ?? ''} label={branch || baseName(repo ?? '') || ''} onError={onError}/>
                 <CommitTree commits={commits} selected={pickedCommit} onSelect={setPickedCommit}
@@ -1502,7 +1521,9 @@ function RemotePane({push, merge, pullRequest, busy, onCreatePullRequest, onOpen
             <h2>リモート</h2>
             <p className={pushLine.ok ? 'remote-ok' : undefined}>{pushLine.ok ? '✓ ' : ''}{pushLine.text}</p>
             {push?.upstream && push.behind > 0 && (
-                <p className="remote-muted">{push.upstream} にまだ取り込んでいないコミットが {push.behind} 件あります</p>
+                <p className="remote-muted">
+                    {push.upstream} にまだ取り込んでいないコミットが {push.behind} 件あります{push.ahead === 0 && '（↓ で取り込めます）'}
+                </p>
             )}
             {merge?.merging ? (
                 <p className={merge.conflicts.length > 0 ? 'remote-conflict' : undefined}>
