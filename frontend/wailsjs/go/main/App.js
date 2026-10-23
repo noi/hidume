@@ -6,6 +6,10 @@ export function AbortMerge() {
   return window['go']['main']['App']['AbortMerge']();
 }
 
+export function ClearRepository() {
+  return window['go']['main']['App']['ClearRepository']();
+}
+
 export function Commit(arg1) {
   return window['go']['main']['App']['Commit'](arg1);
 }

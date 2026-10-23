@@ -71,17 +71,11 @@ func (a *App) startup(ctx context.Context) {
 	go a.watch(ctx)
 }
 
-// openInitialRepository は、前回開いたリポジトリがまだあればそれを、なければ起動したディレクトリを開く
+// openInitialRepository は、前回開いたリポジトリがまだあればそれを開く。
+// 選択をクリアしたときや、まだ選んでいないときは何も開かない
 func (a *App) openInitialRepository() {
 	if saved := loadConfig().Repository; saved != "" {
 		if root, err := repoRoot(saved); err == nil {
-			a.setDir(root)
-			return
-		}
-	}
-	if wd, err := os.Getwd(); err == nil {
-		a.setDir(wd)
-		if root, err := repoRoot(wd); err == nil {
 			a.setDir(root)
 		}
 	}
@@ -95,9 +89,15 @@ func (a *App) switchRepository(root string) string {
 	return root
 }
 
-// GetRepository は現在のリポジトリのパスを返す
+// GetRepository は現在のリポジトリのパスを返す。何も開いていなければ空
 func (a *App) GetRepository() string {
 	return a.dir()
+}
+
+// ClearRepository はリポジトリの選択を外し、次の起動でも開かないようにする
+func (a *App) ClearRepository() error {
+	a.setDir("")
+	return updateConfig(func(c *config) { c.Repository = "" })
 }
 
 // RepoSelection はディレクトリ選択の結果
@@ -321,7 +321,14 @@ func (a *App) runGit(args ...string) (string, error) {
 	return runGitIn(a.dir(), args...)
 }
 
+// errNoRepository はリポジトリを開いていないときのエラー
+var errNoRepository = fmt.Errorf("リポジトリが選ばれていません")
+
 func runGitIn(dir string, args ...string) (string, error) {
+	// 空だとアプリを起動したディレクトリで動いてしまう
+	if dir == "" {
+		return "", errNoRepository
+	}
 	var stdout, stderr bytes.Buffer
 	cmd := exec.Command("git", args...)
 	cmd.Dir = dir

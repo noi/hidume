@@ -4,6 +4,7 @@ import {
     AbortMerge,
     Commit,
     ContinueMerge,
+    ClearRepository,
     CommitAll,
     CompleteSetup,
     CreateBranch,
@@ -210,7 +211,8 @@ function saveAutoClaude(on: boolean) {
 function App() {
     const [status, setStatus] = useState<main.StatusEntry[]>([]);
     const [commits, setCommits] = useState<main.Commit[]>([]);
-    const [repo, setRepo] = useState('');
+    // 開いているリポジトリ。何も開いていなければ空、まだ聞いていなければ null
+    const [repo, setRepo] = useState<string | null>(null);
     // 操作の失敗。読み直しでは消さず、次の操作が成功するか閉じるまで出しておく
     const [error, setError] = useState('');
     // ローカルの情報の読み込みの失敗。読み直しに成功したら消す
@@ -259,14 +261,28 @@ function App() {
 
     // ローカルの情報（変更ファイル、コミット、push の状態）だけを読み直す
     const refreshLocal = useCallback(() => {
-        Promise.all([GetStatus(), GetCommits(COMMIT_LIMIT), GetPushStatus(), GetMergeStatus()])
-            .then(([s, c, p, m]) => {
-                setStatus(s);
-                setCommits(c);
-                setPushStatus(p);
-                setMergeStatus(m);
-                if (!m.merging) setDelegatedMerge(false);
-                setLoadError('');
+        GetRepository()
+            .then((dir) => {
+                setRepo(dir);
+                // 何も開いていなければ、前のリポジトリの表示を消す
+                if (!dir) {
+                    setStatus([]);
+                    setCommits([]);
+                    setPushStatus(null);
+                    setMergeStatus(null);
+                    setDelegatedMerge(false);
+                    setLoadError('');
+                    return;
+                }
+                return Promise.all([GetStatus(), GetCommits(COMMIT_LIMIT), GetPushStatus(), GetMergeStatus()])
+                    .then(([s, c, p, m]) => {
+                        setStatus(s);
+                        setCommits(c);
+                        setPushStatus(p);
+                        setMergeStatus(m);
+                        if (!m.merging) setDelegatedMerge(false);
+                        setLoadError('');
+                    });
             })
             .catch((e) => setLoadError(String(e)));
     }, []);
@@ -294,6 +310,17 @@ function App() {
             .then(({repo: dir, needsInit}) => {
                 setInitDir(needsInit || null);
                 if (!needsInit && dir !== repo) switchTo(dir, `${baseName(dir)} を開いたよ`);
+            })
+            .catch(onError);
+    };
+
+    // 開いているリポジトリを閉じて、何も開いていない状態にする
+    const clearRepository = () => {
+        ClearRepository()
+            .then(() => {
+                closeDraft();
+                setConfirmingMerge(false);
+                switchTo('', 'リポジトリを閉じたよ');
             })
             .catch(onError);
     };
@@ -482,7 +509,7 @@ function App() {
 
     // 作成先は Organization を優先し、既定でも最初の Organization を選んでおく
     const startCreate = () => {
-        const value = baseName(repo) ?? '';
+        const value = baseName(repo ?? '') ?? '';
         setPushFlow({step: 'create', value, owner: '', user: '', owners: null});
         GetGitHubOwners()
             .then(({user, orgs}) => {
@@ -1062,6 +1089,9 @@ ${fence}
         speech = `${describeError(error || loadError)} Claude に見てもらう？`;
         sad = true;
         actions = [{label: 'Claude に解消してもらう', onClick: () => delegateError(error || loadError)}];
+    } else if (repo === '') {
+        speech = 'リポジトリを選んでね。git リポジトリじゃないフォルダなら、git init もできるよ';
+        actions = [{label: 'リポジトリを選ぶ', onClick: selectRepository}];
     } else if (unborn && branch) {
         speech = 'まだコミットがないよ。空の最初のコミットを作って、作業用のブランチを切ろうか？';
         actions = [
@@ -1107,7 +1137,6 @@ ${fence}
 
     // ローカルの変化は Go 側の監視が知らせてくる。PR は定期的に、ウィンドウに戻ったときにも確認する
     useEffect(() => {
-        GetRepository().then(setRepo);
         refresh();
         // ベースブランチも同じ間隔で fetch する。取ってきた変化は Go 側の監視が知らせてくる
         const pollRemote = () => {
@@ -1136,11 +1165,18 @@ ${fence}
                             || (pushFlow?.step === 'force' && !pushFlow.plan)
                             || (prDraft !== null && (!prDraft.bases || generating))
                             || (branchDraft !== null && !branchDraft.prefix)}/>
-                <button className="repo" title={repo} onClick={selectRepository}>
-                    {repo ? repo.split('/').pop() : 'リポジトリを選択'}
-                </button>
+                {/* リポジトリの選択とクリアは、1 つのボタンに見えるようにまとめる */}
+                <div className="repo-group">
+                    <button className="repo" title={repo ?? undefined} onClick={selectRepository}>
+                        {repo ? repo.split('/').pop() : 'リポジトリを選択'}
+                    </button>
+                    {repo && (
+                        <button className="repo-clear" title="リポジトリの選択をクリア" disabled={busy !== null}
+                                onClick={clearRepository}>×</button>
+                    )}
+                </div>
                 <WorktreeMenu branch={branch || (pushStatus ? 'ブランチなし' : '…')} onDefault={onDefault}
-                              defaultBranch={pushStatus?.defaultBranch ?? ''} disabled={unborn || busy !== null}
+                              defaultBranch={pushStatus?.defaultBranch ?? ''} disabled={!repo || unborn || busy !== null}
                               onSwitch={switchWorktree} onCreate={startBranch} onError={onError}/>
             </header>
             {/* セットアップ中は、git がないことによる読み込みの失敗は出さない */}
@@ -1154,7 +1190,7 @@ ${fence}
                 <RemotePane push={pushStatus} merge={mergeStatus} pullRequest={pullRequest} busy={busy !== null}
                             onCreatePullRequest={startPullRequest}
                             onOpen={(url) => OpenURL(url).catch(onError)}/>
-                <StatusPane key={repo} entries={status} onChange={refresh} onError={onError} onSpeak={setReaction}/>
+                <StatusPane key={repo ?? ''} entries={status} onChange={refresh} onError={onError} onSpeak={setReaction}/>
                 <div className="commit-bar">
                     <div className="commit-buttons">
                         <button title={onDefault ? 'デフォルトブランチにはコミットしない' : 'コミット対象をコミットする'}
@@ -1167,7 +1203,7 @@ ${fence}
                     <button title={pushTitle} disabled={!canPush} onClick={startPush}>↑</button>
                     <button title={mergeTitle} disabled={!canMerge} onClick={() => setConfirmingMerge(true)}>↓</button>
                 </div>
-                <ChatPane repo={repo} label={branch || baseName(repo) || ''} onError={onError}/>
+                <ChatPane repo={repo ?? ''} label={branch || baseName(repo ?? '') || ''} onError={onError}/>
                 <CommitTree commits={commits} selected={pickedCommit} onSelect={setPickedCommit}
                             canRevert={revert.target !== null} onRevert={() => setConfirmingRevert(true)}/>
             </main>
