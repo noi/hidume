@@ -74,6 +74,24 @@ export namespace main {
 	        this.unpushed = source["unpushed"];
 	    }
 	}
+	export class ForcePushPlan {
+	    upstream: string;
+	    expected: string;
+	    lost: string[];
+	    ahead: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new ForcePushPlan(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.upstream = source["upstream"];
+	        this.expected = source["expected"];
+	        this.lost = source["lost"];
+	        this.ahead = source["ahead"];
+	    }
+	}
 	export class GitHubOwners {
 	    user: string;
 	    orgs: string[];
@@ -91,6 +109,7 @@ export namespace main {
 	export class MergeStatus {
 	    base: string;
 	    behind: number;
+	    ahead: number;
 	    wouldConflict: string[];
 	    merging: boolean;
 	    conflicts: string[];
@@ -103,6 +122,7 @@ export namespace main {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.base = source["base"];
 	        this.behind = source["behind"];
+	        this.ahead = source["ahead"];
 	        this.wouldConflict = source["wouldConflict"];
 	        this.merging = source["merging"];
 	        this.conflicts = source["conflicts"];
@@ -133,6 +153,7 @@ export namespace main {
 	export class PullRequestDefaults {
 	    bases: string[];
 	    title: string;
+	    body: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new PullRequestDefaults(source);
@@ -142,6 +163,7 @@ export namespace main {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.bases = source["bases"];
 	        this.title = source["title"];
+	        this.body = source["body"];
 	    }
 	}
 	export class PushStatus {

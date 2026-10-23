@@ -14,6 +14,8 @@ type MergeStatus struct {
 	Base string `json:"base"`
 	// origin/<Base> にあって、まだ取り込んでいないコミットの数（最後に fetch した時点）
 	Behind int `json:"behind"`
+	// HEAD にあって origin/<Base> にないコミットの数。0 なら PR にする差分がない
+	Ahead int `json:"ahead"`
 	// 今 origin/<Base> を取り込むとコンフリクトするファイル
 	WouldConflict []string `json:"wouldConflict"`
 	// マージの途中か（MERGE_HEAD がある）
@@ -37,6 +39,7 @@ func (a *App) GetMergeStatus() MergeStatus {
 	}
 	s.Base = base
 	s.Behind = a.countCommits("HEAD.." + ref)
+	s.Ahead = a.countCommits(ref + "..HEAD")
 	if s.Behind == 0 || s.Merging {
 		return s
 	}

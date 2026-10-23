@@ -51,9 +51,11 @@ type PullRequestDefaults struct {
 	// マージ先の候補。先頭がデフォルトブランチ
 	Bases []string `json:"bases"`
 	Title string   `json:"title"`
+	// 1 つ目のマージ先より後のコミットの件名を並べたもの
+	Body string `json:"body"`
 }
 
-// GetPullRequestDefaults は PR のマージ先の候補とタイトルの初期値を返す
+// GetPullRequestDefaults は PR のマージ先の候補と、タイトル・本文の初期値を返す
 func (a *App) GetPullRequestDefaults() (PullRequestDefaults, error) {
 	s := a.GetPushStatus()
 	d := PullRequestDefaults{Bases: []string{}}
@@ -73,10 +75,12 @@ func (a *App) GetPullRequestDefaults() (PullRequestDefaults, error) {
 		return d, fmt.Errorf("マージ先にできるブランチが origin にありません")
 	}
 	// コミットが 1 つならその件名、複数ならブランチ名をタイトルの初期値にする
+	subjects := a.subjectsSince(d.Bases[0])
 	d.Title = s.Branch
-	if subjects := a.subjectsSince(d.Bases[0]); len(subjects) == 1 {
+	if len(subjects) == 1 {
 		d.Title = subjects[0]
 	}
+	d.Body = subjectList(subjects)
 	return d, nil
 }
 
@@ -88,11 +92,18 @@ func (a *App) subjectsSince(base string) []string {
 	return strings.FieldsFunc(out, func(r rune) bool { return r == '\n' })
 }
 
+func subjectList(subjects []string) string {
+	var body strings.Builder
+	for _, subject := range subjects {
+		body.WriteString("- " + subject + "\n")
+	}
+	return body.String()
+}
+
 var branchName = regexp.MustCompile(`^[A-Za-z0-9._/-]+$`)
 
-// CreatePullRequest は push 済みの今のブランチから base への PR を作り、その URL を返す。
-// 本文には base より後のコミットの件名を並べる
-func (a *App) CreatePullRequest(base, title string, draft bool) (string, error) {
+// CreatePullRequest は push 済みの今のブランチから base への PR を作り、その URL を返す
+func (a *App) CreatePullRequest(base, title, body string, draft bool) (string, error) {
 	s := a.GetPushStatus()
 	switch {
 	case s.Branch == "":
@@ -114,15 +125,21 @@ func (a *App) CreatePullRequest(base, title string, draft bool) (string, error) 
 	if title == "" {
 		return "", fmt.Errorf("タイトルを入れてください")
 	}
+	body = strings.TrimSpace(strings.Map(func(r rune) rune {
+		if r == '\n' || r == '\t' || !unicode.IsControl(r) {
+			return r
+		}
+		return -1
+	}, strings.ReplaceAll(body, "\r\n", "\n")))
 	if err := requireGh(); err != nil {
 		return "", err
 	}
 
-	var body strings.Builder
-	for _, subject := range a.subjectsSince(base) {
-		body.WriteString("- " + subject + "\n")
+	if len(a.subjectsSince(base)) == 0 {
+		return "", fmt.Errorf("origin/%s との差分がないので PR を作れません", base)
 	}
-	args := []string{"pr", "create", "--base", base, "--head", s.Branch, "--title", title, "--body", body.String()}
+	// タイトルや本文が - で始まっても、オプションと取り違えられないように = でつなぐ
+	args := []string{"pr", "create", "--base", base, "--head", s.Branch, "--title=" + title, "--body=" + body}
 	if draft {
 		args = append(args, "--draft")
 	}
