@@ -1,3 +1,9 @@
 # Claude Code (個人用設定)
 .claude/settings.local.json
 CLAUDE.local.md
+
+# Wails
+build/bin
+frontend/dist
+frontend/node_modules
+frontend/package.json.md5
