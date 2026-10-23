@@ -2,14 +2,17 @@ import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import './App.css';
 import {
     AbortMerge,
+    AddToGitignore,
     Commit,
     ContinueMerge,
+    ClearRepository,
     CommitAll,
+    CompleteSetup,
     CreateBranch,
     CreateInitialCommit,
     CreateGitHubRepository,
     CreatePullRequest,
-    FetchBase,
+    FetchRemote,
     ForcePush,
     GenerateCommitMessage,
     GeneratePullRequest,
@@ -21,12 +24,15 @@ import {
     GetPullRequestDefaults,
     GetPushStatus,
     GetRepository,
+    GetSetup,
     GetStatus,
     PrepareForcePush,
     InitRepository,
+    InstallTool,
     ListWorktrees,
     MergeBase,
     OpenURL,
+    PullUpstream,
     Push,
     RevertTo,
     SelectRepository,
@@ -38,9 +44,10 @@ import {
     Unstage
 } from "../wailsjs/go/main/App";
 import {main} from "../wailsjs/go/models";
-import {EventsOn} from "../wailsjs/runtime/runtime";
+import {ClipboardSetText, EventsOn} from "../wailsjs/runtime/runtime";
 import {layoutGraph} from "./commitGraph";
 import {ChatPane} from "./ChatPane";
+import {isSecretFile} from "./secrets";
 import {describeError, describeStatus, Mascot, SpeechAction, SpeechInput, SpeechOption, SpeechSelect} from "./Mascot";
 
 const COMMIT_LIMIT = 300;
@@ -72,6 +79,15 @@ type CommitDraft = {
     message: string;
     // Claude が書いたメッセージが入っているか
     byClaude: boolean;
+};
+
+// コミットしようとしたものに、秘密の情報が入っていそうなファイルがあったとき
+type SecretCheck = {
+    // 全ファイルの変更をコミットしようとしていたか
+    all: boolean;
+    paths: string[];
+    // すでに git で追跡しているファイルがあるか。あると .gitignore に足しても効かない
+    tracked: boolean;
 };
 
 // push の確認と、origin がないときの設定の流れ
@@ -120,12 +136,79 @@ type PullRequestState = {
 
 const AUTO_CLAUDE_KEY = 'hidume.autoClaude';
 
-// 「常に Claude に書かせる」はこの端末だけの設定なので localStorage に置く
+// 初回のセットアップ。hello はヒヅメくんの自己紹介、tools は足りない道具やログインを順に済ませているところ
+type SetupFlow = {
+    step: 'hello' | 'tools';
+    status: main.SetupStatus;
+    // 「あとで」にしたもの
+    skipped: string[];
+    // ターミナルで終わるのを待っているもの
+    waiting: string | null;
+    // 直前に済んだことを伝えるセリフ
+    done: string | null;
+};
+
+type SetupItem = {
+    label: string;
+    // まだのときに、やってよいか聞くセリフ
+    ask: string;
+    done: string;
+    // ターミナルでやるものは、待っている間のセリフ
+    waiting?: string;
+    // 先に済ませておく必要があるもの
+    needs?: string;
+};
+
+const SETUP_ITEMS: Record<string, SetupItem> = {
+    brew: {
+        label: 'Homebrew',
+        ask: 'Homebrew がまだないみたい。Mac にいろんな道具を入れるための道具だよ。ターミナルが開くから、そこでインストールしてね。入れていい？',
+        done: 'Homebrew を入れたよ！',
+        waiting: 'ターミナルで Homebrew を入れてるよ。パスワードを聞かれたら Mac のログインパスワードを入れてね'
+            + '（打っても画面には出ないよ）。終わったら教えてね',
+    },
+    git: {
+        label: 'git',
+        ask: 'git がまだないみたい。ファイルの変更を記録する道具で、ぼくはこれを使って働くんだ。入れていい？',
+        done: 'git を入れたよ！',
+        needs: 'brew',
+    },
+    gh: {
+        label: 'GitHub CLI（gh）',
+        ask: 'GitHub CLI（gh）がまだないみたい。GitHub にリポジトリや PR を作るのに使うよ。入れていい？',
+        done: 'GitHub CLI（gh）を入れたよ！',
+        needs: 'brew',
+    },
+    'gh-auth': {
+        label: 'GitHub へのログイン',
+        ask: 'GitHub にまだログインしてないみたい。ターミナルが開くから、そこでログインしてね。ログインする？',
+        done: 'GitHub にログインできたよ！',
+        waiting: 'ターミナルで GitHub にログインしてるよ。表示されたコードを、開いたブラウザに入れてね。終わったら教えてね',
+        needs: 'gh',
+    },
+    claude: {
+        label: 'Claude Code',
+        ask: 'Claude Code がまだないみたい。コミットメッセージを書いたり、コンフリクトを解消したりしてくれる AI だよ。入れていい？',
+        done: 'Claude Code を入れたよ！',
+        needs: 'brew',
+    },
+    'claude-auth': {
+        label: 'Claude へのログイン',
+        ask: 'Claude にまだログインしてないみたい。ターミナルが開くから、そこでログインしてね。ログインする？',
+        done: 'Claude にログインできたよ！',
+        waiting: 'ターミナルで Claude にログインしてるよ。開いたブラウザで、Claude のアカウントでログインしてね。終わったら教えてね',
+        needs: 'claude',
+    },
+};
+// ターミナルでやっていることが終わったかを確かめる間隔
+const SETUP_POLL_MS = 3000;
+
+// 「常に Claude に書かせる」はこの端末だけの設定なので localStorage に置く。外したことがなければオン
 function loadAutoClaude() {
     try {
-        return localStorage.getItem(AUTO_CLAUDE_KEY) === '1';
+        return localStorage.getItem(AUTO_CLAUDE_KEY) !== '0';
     } catch {
-        return false;
+        return true;
     }
 }
 
@@ -140,7 +223,8 @@ function saveAutoClaude(on: boolean) {
 function App() {
     const [status, setStatus] = useState<main.StatusEntry[]>([]);
     const [commits, setCommits] = useState<main.Commit[]>([]);
-    const [repo, setRepo] = useState('');
+    // 開いているリポジトリ。何も開いていなければ空、まだ聞いていなければ null
+    const [repo, setRepo] = useState<string | null>(null);
     // 操作の失敗。読み直しでは消さず、次の操作が成功するか閉じるまで出しておく
     const [error, setError] = useState('');
     // ローカルの情報の読み込みの失敗。読み直しに成功したら消す
@@ -149,6 +233,7 @@ function App() {
     // git init するか聞いているディレクトリ
     const [initDir, setInitDir] = useState<string | null>(null);
     const [draft, setDraft] = useState<CommitDraft | null>(null);
+    const [secretCheck, setSecretCheck] = useState<SecretCheck | null>(null);
     const [autoClaude, setAutoClaude] = useState(loadAutoClaude);
     const [generating, setGenerating] = useState(false);
     // 古い生成結果で、開き直した入力欄を上書きしないための番号
@@ -169,6 +254,7 @@ function App() {
     const [delegatedMerge, setDelegatedMerge] = useState(false);
     // push など時間のかかる操作の最中に、ヒヅメくんが言うこと
     const [busy, setBusy] = useState<string | null>(null);
+    const [setup, setSetup] = useState<SetupFlow | null>(null);
 
     useEffect(() => {
         if (!reaction) return;
@@ -188,14 +274,28 @@ function App() {
 
     // ローカルの情報（変更ファイル、コミット、push の状態）だけを読み直す
     const refreshLocal = useCallback(() => {
-        Promise.all([GetStatus(), GetCommits(COMMIT_LIMIT), GetPushStatus(), GetMergeStatus()])
-            .then(([s, c, p, m]) => {
-                setStatus(s);
-                setCommits(c);
-                setPushStatus(p);
-                setMergeStatus(m);
-                if (!m.merging) setDelegatedMerge(false);
-                setLoadError('');
+        GetRepository()
+            .then((dir) => {
+                setRepo(dir);
+                // 何も開いていなければ、前のリポジトリの表示を消す
+                if (!dir) {
+                    setStatus([]);
+                    setCommits([]);
+                    setPushStatus(null);
+                    setMergeStatus(null);
+                    setDelegatedMerge(false);
+                    setLoadError('');
+                    return;
+                }
+                return Promise.all([GetStatus(), GetCommits(COMMIT_LIMIT), GetPushStatus(), GetMergeStatus()])
+                    .then(([s, c, p, m]) => {
+                        setStatus(s);
+                        setCommits(c);
+                        setPushStatus(p);
+                        setMergeStatus(m);
+                        if (!m.merging) setDelegatedMerge(false);
+                        setLoadError('');
+                    });
             })
             .catch((e) => setLoadError(String(e)));
     }, []);
@@ -214,6 +314,7 @@ function App() {
         setPushFlow(null);
         closePrDraft();
         setBranchDraft(null);
+        setSecretCheck(null);
         setReaction(message);
         refresh();
     };
@@ -227,11 +328,70 @@ function App() {
             .catch(onError);
     };
 
+    // 開いているリポジトリを閉じて、何も開いていない状態にする
+    const clearRepository = () => {
+        ClearRepository()
+            .then(() => {
+                closeDraft();
+                setConfirmingMerge(false);
+                switchTo('', 'リポジトリを閉じたよ');
+            })
+            .catch(onError);
+    };
+
+    const copyRepositoryPath = () => {
+        if (!repo) return;
+        ClipboardSetText(repo)
+            .then((ok) => ok ? setReaction('パスをコピーしたよ') : onError('クリップボードにコピーできませんでした'))
+            .catch(onError);
+    };
+
     const initRepository = (dir: string) => {
         setInitDir(null);
         InitRepository(dir)
             .then((root) => switchTo(root, `${baseName(root)} で git init したよ！`))
             .catch(onError);
+    };
+
+    // 済んだかを確かめ直す。ターミナルでやっていたことが済んでいたら待つのをやめる
+    const checkSetup = (done?: string) => GetSetup()
+        .then((status) => setSetup((s) => {
+            if (s?.step !== 'tools') return s;
+            if (s.waiting && status.tools.find((t) => t.name === s.waiting)?.installed) {
+                return {...s, status, waiting: null, done: SETUP_ITEMS[s.waiting].done};
+            }
+            return {...s, status, done: done ?? s.done};
+        }))
+        .catch(onError);
+
+    // パスワードやブラウザでの操作が要るものはターミナルで始め、ほかは brew で入れ終わるまで待つ
+    const installTool = (name: string) => {
+        const item = SETUP_ITEMS[name];
+        setError('');
+        if (item.waiting) {
+            InstallTool(name)
+                .then(() => setSetup((s) => s && {...s, waiting: name, done: null}))
+                .catch(onError);
+            return;
+        }
+        setBusy(`${item.label} を入れてるよ…（数分かかることもあるよ）`);
+        InstallTool(name)
+            .then(() => checkSetup(item.done))
+            .catch(onError)
+            .finally(() => setBusy(null));
+    };
+
+    const skipTool = (name: string) => {
+        setError('');
+        setSetup((s) => s && {...s, skipped: [...s.skipped, name], waiting: null, done: null});
+    };
+
+    const finishSetup = () => {
+        CompleteSetup().catch(onError);
+        setSetup(null);
+        setReaction('準備ができたよ！ これからよろしくね');
+        // git がなくて読めていなかった情報を読み直す
+        refresh();
     };
 
     const stageAll = () => {
@@ -310,10 +470,47 @@ function App() {
             });
     };
 
-    const openDraft = (all: boolean) => {
+    // コミットするファイルに秘密の情報が入っていそうなものがあれば、メッセージを聞く前に止める。
+    // checked は確かめ済み（外した後や、そのままコミットすると答えた後）のとき
+    const openDraft = (all: boolean, checked = false) => {
+        if (!checked) {
+            // 消すだけの変更は中身をコミットしないので気にしない
+            const files = status.filter((e) => e.index !== 'D' && (all ? e.workTree !== 'D' : e.index !== ' ' && e.index !== '?'));
+            const secrets = files.filter((e) => isSecretFile(e.path));
+            if (secrets.length > 0) {
+                setSecretCheck({
+                    all,
+                    paths: secrets.map((e) => e.path),
+                    tracked: secrets.some((e) => e.index !== '?' && e.index !== 'A'),
+                });
+                return;
+            }
+        }
         setDraft({all, message: '', byClaude: false});
         if (autoClaude) writeWithClaude(all);
         else setGenerating(false);
+    };
+
+    // 秘密の情報が入っていそうなファイルをコミット対象から外し、残りをコミットする流れに進む。
+    // ignore なら .gitignore にも足し、その .gitignore の変更もコミット対象にする
+    const excludeSecrets = (c: SecretCheck, ignore: boolean) => {
+        setSecretCheck(null);
+        // 全ファイルをコミットするときは、先に全部をコミット対象にしてから外す
+        (c.all ? StageAll() : Promise.resolve())
+            .then(() => Unstage(c.paths))
+            .then(() => ignore ? AddToGitignore(c.paths).then(() => Stage(['.gitignore'])) : undefined)
+            .then(() => GetStatus())
+            .then((entries) => {
+                if (entries.some((e) => e.index !== ' ' && e.index !== '?')) {
+                    setStatus(entries);
+                    openDraft(false, true);
+                } else {
+                    setReaction(ignore ? '.gitignore に足して外したよ。ほかにコミットするものはないみたい'
+                        : '外したら、コミットするものがなくなったよ');
+                }
+            })
+            .catch(onError)
+            .finally(refresh);
     };
 
     const closeDraft = () => {
@@ -370,7 +567,7 @@ function App() {
 
     // 作成先は Organization を優先し、既定でも最初の Organization を選んでおく
     const startCreate = () => {
-        const value = baseName(repo) ?? '';
+        const value = baseName(repo ?? '') ?? '';
         setPushFlow({step: 'create', value, owner: '', user: '', owners: null});
         GetGitHubOwners()
             .then(({user, orgs}) => {
@@ -476,6 +673,12 @@ function App() {
                 : upToDate ? `origin/${base} の最新は取り込み済みです`
                     : `origin/${base} の新しいコミット ${mergeStatus?.behind} 件をマージコミットで取り込む`;
 
+    // 追跡しているリモートブランチにだけ新しいコミットがあれば、早送りで取り込める（pull）。
+    // 手元にしかないコミットもあるとき（diverged）は、フォースプッシュかマージの案内に任せる
+    const upstream = pushStatus?.upstream ?? '';
+    const canPull = !!upstream && pushStatus!.behind > 0 && pushStatus!.ahead === 0 && !busy && !mergeStatus?.merging;
+    const runPull = () => runBusy([[`${upstream} を取り込んでるよ…`, PullUpstream]], `${upstream} の新しいコミットを取り込んだよ！`);
+
     // delegate が true なら、コンフリクトしたときにそのまま Claude パネルへ解消を頼む
     const runMerge = (delegate = false) => {
         setConfirmingMerge(false);
@@ -559,6 +762,13 @@ ${fence}
     // 作業中の変更がないときに勧める、次の一手
     const nextStep = (): { text: string; actions: SpeechAction[] } | null => {
         if (!pushStatus?.branch || onDefault || unborn) return null;
+        // 同じブランチへのほかの人（ほかの Mac）のコミットを先に取り込まないと、プッシュが断られる
+        if (canPull) {
+            return {
+                text: `${upstream} に新しいコミットが ${pushStatus.behind} 件あるよ。取り込む？`,
+                actions: [{label: '取り込む', onClick: runPull}],
+            };
+        }
         const pr = pullRequest.value;
         const behind = mergeStatus?.behind ?? 0;
         // ベースブランチがわからないときは、差分があるものとして扱う
@@ -644,7 +854,48 @@ ${fence}
         },
     };
     let select: SpeechSelect | undefined;
-    if (initDir) {
+    if (setup?.step === 'hello') {
+        speech = 'はじめまして！ ぼくはヒヅメ。きみの git の作業をとなりで手伝うよ。まずは、ぼくが働くのに必要な道具をそろえよう！';
+        actions = [{label: 'よろしくね！', onClick: () => setSetup({...setup, step: 'tools'})}];
+    } else if (setup) {
+        const missing = setup.status.tools.filter((t) => !t.installed);
+        const tool = missing.find((t) => !setup.skipped.includes(t.name));
+        const done = setup.done ? `${setup.done} ` : '';
+        const item = tool && SETUP_ITEMS[tool.name];
+        const needs = item?.needs && missing.some((t) => t.name === item.needs) ? SETUP_ITEMS[item.needs] : null;
+        if (busy) {
+            speech = busy;
+        } else if (!tool || !item) {
+            const later = missing.map((t) => SETUP_ITEMS[t.name].label).join('、');
+            speech = done + (later
+                ? `${later}はあとでやってね。それじゃあ、さっそく使ってみよう！`
+                : '準備は全部そろってるよ。さっそく使ってみよう！');
+            actions = [{label: 'はじめる', onClick: finishSetup}];
+        } else if (error) {
+            speech = `${item.label}がうまくいかなかった… もう一度やってみる？`;
+            sad = true;
+            actions = [
+                {label: 'もう一度', onClick: () => installTool(tool.name)},
+                {label: 'あとで', onClick: () => skipTool(tool.name)},
+            ];
+        } else if (setup.waiting === tool.name && item.waiting) {
+            speech = item.waiting;
+            actions = [
+                {label: '終わった', onClick: () => checkSetup()},
+                {label: 'あとで', onClick: () => skipTool(tool.name)},
+            ];
+        } else if (needs) {
+            speech = `${item.label}には ${needs.label} が要るんだけど、まだないから今はできないよ。あとでやってね`;
+            actions = [{label: '次へ', onClick: () => skipTool(tool.name)}];
+        } else {
+            const login = tool.name.endsWith('-auth');
+            speech = done + item.ask;
+            actions = [
+                {label: login ? 'ログインする' : '入れる', onClick: () => installTool(tool.name)},
+                {label: 'あとで', onClick: () => skipTool(tool.name)},
+            ];
+        }
+    } else if (initDir) {
         speech = `${baseName(initDir)} は git リポジトリじゃないよ。git init する？`;
         actions = [
             {label: 'する', onClick: () => initRepository(initDir)},
@@ -853,6 +1104,21 @@ ${fence}
             {label: '戻す', onClick: runRevert},
             {label: 'やめる', onClick: () => setConfirmingRevert(false)},
         ];
+    } else if (secretCheck) {
+        const c = secretCheck;
+        const names = c.paths.slice(0, 3).map(baseName).join('、') + (c.paths.length > 3 ? ` ほか ${c.paths.length - 3} 件` : '');
+        speech = `${names} は、パスワードや鍵みたいな秘密の情報が入っていそうなファイルだよ。コミットから外す？`;
+        actions = [
+            {label: '外してコミット', onClick: () => excludeSecrets(c, false)},
+            ...(c.tracked ? [] : [{label: '.gitignore に足して外す', onClick: () => excludeSecrets(c, true)}]),
+            {
+                label: 'そのままコミット', danger: true, onClick: () => {
+                    setSecretCheck(null);
+                    openDraft(c.all, true);
+                },
+            },
+            {label: 'やめる', onClick: () => setSecretCheck(null)},
+        ];
     } else if (draft) {
         const target = draft.all ? `全部の変更（${status.length} 件）` : `コミット対象（${stagedCount} 件）`;
         if (generating) {
@@ -909,6 +1175,9 @@ ${fence}
         speech = `${describeError(error || loadError)} Claude に見てもらう？`;
         sad = true;
         actions = [{label: 'Claude に解消してもらう', onClick: () => delegateError(error || loadError)}];
+    } else if (repo === '') {
+        speech = 'リポジトリを選んでね。git リポジトリじゃないフォルダなら、git init もできるよ';
+        actions = [{label: 'リポジトリを選ぶ', onClick: selectRepository}];
     } else if (unborn && branch) {
         speech = 'まだコミットがないよ。空の最初のコミットを作って、作業用のブランチを切ろうか？';
         actions = [
@@ -935,14 +1204,30 @@ ${fence}
         actions = next?.actions ?? [];
     }
 
+    // セットアップを終えていなければ、ヒヅメくんの自己紹介から始める
+    useEffect(() => {
+        GetSetup()
+            .then((status) => {
+                if (!status.done) setSetup({step: 'hello', status, skipped: [], waiting: null, done: null});
+            })
+            .catch(onError);
+    }, []);
+
+    // ターミナルでやっている間は、済んだかを定期的に確かめる
+    const waitingTerminal = setup?.waiting ?? null;
+    useEffect(() => {
+        if (!waitingTerminal) return;
+        const timer = setInterval(() => checkSetup(), SETUP_POLL_MS);
+        return () => clearInterval(timer);
+    }, [waitingTerminal]);
+
     // ローカルの変化は Go 側の監視が知らせてくる。PR は定期的に、ウィンドウに戻ったときにも確認する
     useEffect(() => {
-        GetRepository().then(setRepo);
         refresh();
-        // ベースブランチも同じ間隔で fetch する。取ってきた変化は Go 側の監視が知らせてくる
+        // ベースブランチと今のブランチの追跡先も同じ間隔で fetch する。取ってきた変化は Go 側の監視が知らせてくる
         const pollRemote = () => {
             loadPullRequest();
-            FetchBase().catch(() => {
+            FetchRemote().catch(() => {
                 // オフラインなどで取れなくても、前回の情報のまま表示を続ける
             });
         };
@@ -966,14 +1251,36 @@ ${fence}
                             || (pushFlow?.step === 'force' && !pushFlow.plan)
                             || (prDraft !== null && (!prDraft.bases || generating))
                             || (branchDraft !== null && !branchDraft.prefix)}/>
-                <button className="repo" title={repo} onClick={selectRepository}>
-                    {repo ? repo.split('/').pop() : 'リポジトリを選択'}
-                </button>
-                <WorktreeMenu branch={branch || (pushStatus ? 'ブランチなし' : '…')} onDefault={onDefault}
-                              defaultBranch={pushStatus?.defaultBranch ?? ''} disabled={unborn || busy !== null}
-                              onSwitch={switchWorktree} onCreate={startBranch} onError={onError}/>
+                {/* 右端は 2 段にして、作業ディレクトリのパスもマスコットの高さの中に収める */}
+                <div className="header-side">
+                    <div className="header-buttons">
+                        {/* リポジトリの選択とクリアは、1 つのボタンに見えるようにまとめる */}
+                        <div className="repo-group">
+                            <button className="repo" title={repo ?? undefined} onClick={selectRepository}>
+                                {repo ? repo.split('/').pop() : 'リポジトリを選択'}
+                            </button>
+                            {repo && (
+                                <button className="repo-clear" title="リポジトリの選択をクリア" disabled={busy !== null}
+                                        onClick={clearRepository}>×</button>
+                            )}
+                        </div>
+                        <WorktreeMenu branch={branch || (pushStatus ? 'ブランチなし' : '…')} onDefault={onDefault}
+                                      defaultBranch={pushStatus?.defaultBranch ?? ''}
+                                      disabled={!repo || unborn || busy !== null}
+                                      onSwitch={switchWorktree} onCreate={startBranch} onError={onError}/>
+                    </div>
+                    {/* 開いている作業ディレクトリ（ワークツリー）のフルパス */}
+                    {repo && (
+                        <div className="workdir">
+                            <span className="workdir-path" title={repo}>{repo}</span>
+                            <button className="workdir-copy" title="パスをクリップボードにコピー"
+                                    onClick={copyRepositoryPath}>コピー</button>
+                        </div>
+                    )}
+                </div>
             </header>
-            {(error || loadError) && (
+            {/* セットアップ中は、git がないことによる読み込みの失敗は出さない */}
+            {(error || (!setup && loadError)) && (
                 <div className="error">
                     <span>{error || loadError}</span>
                     {error && <button className="error-close" title="閉じる" onClick={() => setError('')}>×</button>}
@@ -983,7 +1290,7 @@ ${fence}
                 <RemotePane push={pushStatus} merge={mergeStatus} pullRequest={pullRequest} busy={busy !== null}
                             onCreatePullRequest={startPullRequest}
                             onOpen={(url) => OpenURL(url).catch(onError)}/>
-                <StatusPane key={repo} entries={status} onChange={refresh} onError={onError} onSpeak={setReaction}/>
+                <StatusPane key={repo ?? ''} entries={status} onChange={refresh} onError={onError} onSpeak={setReaction}/>
                 <div className="commit-bar">
                     <div className="commit-buttons">
                         <button title={onDefault ? 'デフォルトブランチにはコミットしない' : 'コミット対象をコミットする'}
@@ -994,9 +1301,14 @@ ${fence}
                 {/* コミットツリーの上の線に載せ、コミットを上（リモート）へ送るボタン */}
                 <div className="push-bar">
                     <button title={pushTitle} disabled={!canPush} onClick={startPush}>↑</button>
-                    <button title={mergeTitle} disabled={!canMerge} onClick={() => setConfirmingMerge(true)}>↓</button>
+                    {/* 追跡しているリモートブランチを取り込めるならそちらを先に、なければベースブランチを取り込む */}
+                    {canPull
+                        ? <button title={`${upstream} の新しいコミット ${pushStatus?.behind} 件を取り込む`}
+                                  onClick={runPull}>↓</button>
+                        : <button title={mergeTitle} disabled={!canMerge}
+                                  onClick={() => setConfirmingMerge(true)}>↓</button>}
                 </div>
-                <ChatPane repo={repo} label={branch || baseName(repo) || ''} onError={onError}/>
+                <ChatPane repo={repo ?? ''} label={branch || baseName(repo ?? '') || ''} onError={onError}/>
                 <CommitTree commits={commits} selected={pickedCommit} onSelect={setPickedCommit}
                             canRevert={revert.target !== null} onRevert={() => setConfirmingRevert(true)}/>
             </main>
@@ -1295,7 +1607,9 @@ function RemotePane({push, merge, pullRequest, busy, onCreatePullRequest, onOpen
             <h2>リモート</h2>
             <p className={pushLine.ok ? 'remote-ok' : undefined}>{pushLine.ok ? '✓ ' : ''}{pushLine.text}</p>
             {push?.upstream && push.behind > 0 && (
-                <p className="remote-muted">{push.upstream} にまだ取り込んでいないコミットが {push.behind} 件あります</p>
+                <p className="remote-muted">
+                    {push.upstream} にまだ取り込んでいないコミットが {push.behind} 件あります{push.ahead === 0 && '（↓ で取り込めます）'}
+                </p>
             )}
             {merge?.merging ? (
                 <p className={merge.conflicts.length > 0 ? 'remote-conflict' : undefined}>

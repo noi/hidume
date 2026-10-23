@@ -21,8 +21,8 @@ export function ChatPane({repo, label, onError}: {
 
     // ディレクトリが変わったら、そのディレクトリのセッションの会話を読み直す
     useEffect(() => {
-        if (!repo) return;
         setChat(null);
+        if (!repo) return;
         GetChat().then(setChat).catch(onError);
     }, [repo]);
 
@@ -52,8 +52,13 @@ export function ChatPane({repo, label, onError}: {
 
     return (
         <section className="chat-pane">
-            <h2 title={chat ? `セッション ${chat.sessionId}\n${chat.dir}` : undefined}>Claude — {label}</h2>
+            <h2 title={chat ? `セッション ${chat.sessionId}\n${chat.dir}` : undefined}>
+                {repo && label ? `Claude — ${label}` : 'Claude'}
+            </h2>
             <div className="chat-messages" ref={listRef}>
+                {!repo && (
+                    <p className="chat-empty">リポジトリを選ぶと、そのリポジトリ専用の Claude と話せます。</p>
+                )}
                 {chat?.messages.length === 0 && (
                     <p className="chat-empty">このディレクトリ専用の Claude との会話です。auto モードなので、安全な操作は自動で許可し、危なそうな操作は断ります。</p>
                 )}

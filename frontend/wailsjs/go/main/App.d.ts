@@ -4,9 +4,15 @@ import {main} from '../models';
 
 export function AbortMerge():Promise<void>;
 
+export function AddToGitignore(arg1:Array<string>):Promise<void>;
+
+export function ClearRepository():Promise<void>;
+
 export function Commit(arg1:string):Promise<void>;
 
 export function CommitAll(arg1:string):Promise<void>;
+
+export function CompleteSetup():Promise<void>;
 
 export function ContinueMerge():Promise<void>;
 
@@ -18,7 +24,7 @@ export function CreateInitialCommit():Promise<void>;
 
 export function CreatePullRequest(arg1:string,arg2:string,arg3:string,arg4:boolean):Promise<string>;
 
-export function FetchBase():Promise<void>;
+export function FetchRemote():Promise<void>;
 
 export function ForcePush(arg1:string):Promise<void>;
 
@@ -44,9 +50,13 @@ export function GetPushStatus():Promise<main.PushStatus>;
 
 export function GetRepository():Promise<string>;
 
+export function GetSetup():Promise<main.SetupStatus>;
+
 export function GetStatus():Promise<Array<main.StatusEntry>>;
 
 export function InitRepository(arg1:string):Promise<string>;
+
+export function InstallTool(arg1:string):Promise<void>;
 
 export function ListWorktrees():Promise<Array<main.Worktree>>;
 
@@ -55,6 +65,8 @@ export function MergeBase():Promise<boolean>;
 export function OpenURL(arg1:string):Promise<void>;
 
 export function PrepareForcePush():Promise<main.ForcePushPlan>;
+
+export function PullUpstream():Promise<void>;
 
 export function Push():Promise<void>;
 

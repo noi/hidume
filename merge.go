@@ -69,18 +69,65 @@ func (a *App) mergeTreeConflicts(ref string) ([]string, error) {
 	}
 }
 
-// FetchBase はベースブランチの最新を origin から取ってくる
-func (a *App) FetchBase() error {
-	base := a.defaultBranch()
-	if base == "" {
-		return nil
-	}
+// FetchRemote はベースブランチと、今のブランチが追跡している origin のブランチの最新を取ってくる
+func (a *App) FetchRemote() error {
 	if _, err := a.runGit("remote", "get-url", "origin"); err != nil {
 		return nil
 	}
-	ref := "refs/heads/" + base
-	_, err := a.runNetwork("git", "fetch", "--quiet", "origin", ref+":refs/remotes/origin/"+base)
+	var refspecs []string
+	base := a.defaultBranch()
+	if base != "" {
+		refspecs = append(refspecs, fetchRefspec(base))
+	}
+	if remote, ok := a.upstreamBranch(); ok && remote != base {
+		refspecs = append(refspecs, fetchRefspec(remote))
+	}
+	if len(refspecs) == 0 {
+		return nil
+	}
+	_, err := a.runNetwork("git", append([]string{"fetch", "--quiet", "origin"}, refspecs...)...)
 	return err
+}
+
+func fetchRefspec(branch string) string {
+	return "refs/heads/" + branch + ":refs/remotes/origin/" + branch
+}
+
+// upstreamBranch は今のブランチが追跡している origin のブランチ名（origin/ を除いたもの）を返す
+func (a *App) upstreamBranch() (string, bool) {
+	out, err := a.runGit("rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}")
+	if err != nil {
+		return "", false
+	}
+	remote, ok := strings.CutPrefix(strings.TrimSpace(out), "origin/")
+	// refspec に入れるので、オプションや変な文字が混ざらないものだけにする
+	if !ok || !branchName.MatchString(remote) || strings.HasPrefix(remote, "-") {
+		return "", false
+	}
+	return remote, true
+}
+
+// PullUpstream は追跡している origin のブランチの最新を取ってきて、早送りで今のブランチに取り込む。
+// 手元にしかないコミットもあって早送りできないときは、マージもリベースもせずにやめる
+func (a *App) PullUpstream() error {
+	if a.refExists("MERGE_HEAD") {
+		return fmt.Errorf("マージの途中です。先に完了するかやめてください")
+	}
+	remote, ok := a.upstreamBranch()
+	if !ok {
+		return fmt.Errorf("origin のブランチを追跡していないので取り込めません")
+	}
+	if _, err := a.runNetwork("git", "fetch", "--quiet", "origin", fetchRefspec(remote)); err != nil {
+		return err
+	}
+	// 作業中の変更とぶつかるときは git が止める
+	if _, err := a.runGit("merge", "--ff-only", "--no-edit", "refs/remotes/origin/"+remote); err != nil {
+		if strings.Contains(err.Error(), "Not possible to fast-forward") {
+			return fmt.Errorf("手元にしかないコミットもあるので、早送りで取り込めません")
+		}
+		return err
+	}
+	return nil
 }
 
 // MergeBase はベースブランチの最新を fetch し、マージコミットで今のブランチに取り込む。
@@ -99,7 +146,7 @@ func (a *App) MergeBase() (bool, error) {
 		}
 		return false, fmt.Errorf("コミットしていない変更があります。先にコミットしてから取り込んでください")
 	}
-	if err := a.FetchBase(); err != nil {
+	if err := a.FetchRemote(); err != nil {
 		return false, err
 	}
 	base := a.defaultBranch()

@@ -83,6 +83,9 @@ func (a *App) session(dir string) (*chatSession, error) {
 // GetChat は今開いているディレクトリの会話を返す
 func (a *App) GetChat() (ChatState, error) {
 	dir := a.dir()
+	if dir == "" {
+		return ChatState{}, errNoRepository
+	}
 	a.chats.mu.Lock()
 	defer a.chats.mu.Unlock()
 	s, err := a.session(dir)
@@ -100,6 +103,9 @@ func (a *App) SendChat(text string) error {
 		return fmt.Errorf("メッセージが空です")
 	}
 	dir := a.dir()
+	if dir == "" {
+		return errNoRepository
+	}
 	a.chats.mu.Lock()
 	defer a.chats.mu.Unlock()
 	s, err := a.session(dir)

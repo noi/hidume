@@ -181,9 +181,13 @@ func (a *App) runNetwork(name string, args ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), networkTimeout)
 	defer cancel()
 
+	dir := a.dir()
+	if dir == "" {
+		return "", errNoRepository
+	}
 	var stdout, stderr bytes.Buffer
 	cmd := exec.CommandContext(ctx, name, args...)
-	cmd.Dir = a.dir()
+	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "GH_PROMPT_DISABLED=1", "GIT_OPTIONAL_LOCKS=0")
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr

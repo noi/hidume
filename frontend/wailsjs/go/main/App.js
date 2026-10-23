@@ -6,12 +6,24 @@ export function AbortMerge() {
   return window['go']['main']['App']['AbortMerge']();
 }
 
+export function AddToGitignore(arg1) {
+  return window['go']['main']['App']['AddToGitignore'](arg1);
+}
+
+export function ClearRepository() {
+  return window['go']['main']['App']['ClearRepository']();
+}
+
 export function Commit(arg1) {
   return window['go']['main']['App']['Commit'](arg1);
 }
 
 export function CommitAll(arg1) {
   return window['go']['main']['App']['CommitAll'](arg1);
+}
+
+export function CompleteSetup() {
+  return window['go']['main']['App']['CompleteSetup']();
 }
 
 export function ContinueMerge() {
@@ -34,8 +46,8 @@ export function CreatePullRequest(arg1, arg2, arg3, arg4) {
   return window['go']['main']['App']['CreatePullRequest'](arg1, arg2, arg3, arg4);
 }
 
-export function FetchBase() {
-  return window['go']['main']['App']['FetchBase']();
+export function FetchRemote() {
+  return window['go']['main']['App']['FetchRemote']();
 }
 
 export function ForcePush(arg1) {
@@ -86,12 +98,20 @@ export function GetRepository() {
   return window['go']['main']['App']['GetRepository']();
 }
 
+export function GetSetup() {
+  return window['go']['main']['App']['GetSetup']();
+}
+
 export function GetStatus() {
   return window['go']['main']['App']['GetStatus']();
 }
 
 export function InitRepository(arg1) {
   return window['go']['main']['App']['InitRepository'](arg1);
+}
+
+export function InstallTool(arg1) {
+  return window['go']['main']['App']['InstallTool'](arg1);
 }
 
 export function ListWorktrees() {
@@ -108,6 +128,10 @@ export function OpenURL(arg1) {
 
 export function PrepareForcePush() {
   return window['go']['main']['App']['PrepareForcePush']();
+}
+
+export function PullUpstream() {
+  return window['go']['main']['App']['PullUpstream']();
 }
 
 export function Push() {

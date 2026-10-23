@@ -71,17 +71,11 @@ func (a *App) startup(ctx context.Context) {
 	go a.watch(ctx)
 }
 
-// openInitialRepository は、前回開いたリポジトリがまだあればそれを、なければ起動したディレクトリを開く
+// openInitialRepository は、前回開いたリポジトリがまだあればそれを開く。
+// 選択をクリアしたときや、まだ選んでいないときは何も開かない
 func (a *App) openInitialRepository() {
 	if saved := loadConfig().Repository; saved != "" {
 		if root, err := repoRoot(saved); err == nil {
-			a.setDir(root)
-			return
-		}
-	}
-	if wd, err := os.Getwd(); err == nil {
-		a.setDir(wd)
-		if root, err := repoRoot(wd); err == nil {
 			a.setDir(root)
 		}
 	}
@@ -95,9 +89,15 @@ func (a *App) switchRepository(root string) string {
 	return root
 }
 
-// GetRepository は現在のリポジトリのパスを返す
+// GetRepository は現在のリポジトリのパスを返す。何も開いていなければ空
 func (a *App) GetRepository() string {
 	return a.dir()
+}
+
+// ClearRepository はリポジトリの選択を外し、次の起動でも開かないようにする
+func (a *App) ClearRepository() error {
+	a.setDir("")
+	return updateConfig(func(c *config) { c.Repository = "" })
 }
 
 // RepoSelection はディレクトリ選択の結果
@@ -113,6 +113,8 @@ func (a *App) SelectRepository() (RepoSelection, error) {
 	dir, err := runtime.OpenDirectoryDialog(a.ctx, runtime.OpenDialogOptions{
 		Title:            "リポジトリを選択",
 		DefaultDirectory: a.dir(),
+		// 新しく作ったフォルダーを選べば、そのまま git init するか聞く流れに進む
+		CanCreateDirectories: true,
 	})
 	if err != nil || dir == "" {
 		return RepoSelection{Repo: a.dir()}, err
@@ -160,16 +162,18 @@ func (a *App) GetStatus() ([]StatusEntry, error) {
 	return entries, nil
 }
 
-// GetCommits は全ブランチのコミットをトポロジカル順に最大 limit 件返す
+// GetCommits は今のブランチ（ヘッドブランチ）とベースブランチのコミットを、トポロジカル順に最大 limit 件返す。
+// ほかのブランチやタグは出さない
 func (a *App) GetCommits(limit int) ([]Commit, error) {
-	out, err := a.runGit("log", "--all", "--topo-order", "--decorate=short",
+	// git init 直後などコミットがまだないときは空にする
+	if !a.hasHead() {
+		return []Commit{}, nil
+	}
+	revs, shown := a.treeRefs()
+	out, err := a.runGit(append([]string{"log", "--topo-order", "--decorate=short",
 		fmt.Sprintf("--max-count=%d", limit),
-		"--format=%H%x1f%P%x1f%an%x1f%at%x1f%D%x1f%s%x1e")
+		"--format=%H%x1f%P%x1f%an%x1f%at%x1f%D%x1f%s%x1e", "--end-of-options"}, revs...)...)
 	if err != nil {
-		// git init 直後などコミットがまだないときは空にする
-		if !a.hasHead() {
-			return []Commit{}, nil
-		}
 		return nil, err
 	}
 	unpushed := a.unpushedCommits(limit)
@@ -193,12 +197,35 @@ func (a *App) GetCommits(limit int) ([]Commit, error) {
 			Subject:  f[5],
 			Unpushed: unpushed[f[0]],
 		}
-		if f[4] != "" {
-			c.Refs = strings.Split(f[4], ", ")
+		for _, ref := range strings.Split(f[4], ", ") {
+			if shown[ref] || strings.HasPrefix(ref, "HEAD -> ") {
+				c.Refs = append(c.Refs, ref)
+			}
 		}
 		commits = append(commits, c)
 	}
 	return commits, nil
+}
+
+// treeRefs はコミットツリーに出すコミットの起点と、ラベルとして出すブランチ名（--decorate=short の形）を返す。
+// 今のブランチとその追跡先、ベースブランチの手元と origin だけにする
+func (a *App) treeRefs() (revs []string, shown map[string]bool) {
+	revs = []string{"HEAD"}
+	shown = map[string]bool{"HEAD": true}
+	if out, err := a.runGit("rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"); err == nil {
+		upstream := strings.TrimSpace(out)
+		revs = append(revs, "@{upstream}")
+		shown[upstream] = true
+	}
+	if base := a.defaultBranch(); base != "" {
+		for _, ref := range []string{"refs/heads/" + base, "refs/remotes/origin/" + base} {
+			if a.refExists(ref) {
+				revs = append(revs, ref)
+				shown[strings.TrimPrefix(strings.TrimPrefix(ref, "refs/heads/"), "refs/remotes/")] = true
+			}
+		}
+	}
+	return revs, shown
 }
 
 // Stage は指定したファイルをステージする
@@ -321,7 +348,14 @@ func (a *App) runGit(args ...string) (string, error) {
 	return runGitIn(a.dir(), args...)
 }
 
+// errNoRepository はリポジトリを開いていないときのエラー
+var errNoRepository = fmt.Errorf("リポジトリが選ばれていません")
+
 func runGitIn(dir string, args ...string) (string, error) {
+	// 空だとアプリを起動したディレクトリで動いてしまう
+	if dir == "" {
+		return "", errNoRepository
+	}
 	var stdout, stderr bytes.Buffer
 	cmd := exec.Command("git", args...)
 	cmd.Dir = dir

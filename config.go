@@ -13,6 +13,8 @@ type config struct {
 	Repository string `json:"repository"`
 	// ディレクトリごとの Claude Code のセッション ID（ディレクトリとセッションは 1 対 1）
 	Sessions map[string]string `json:"sessions,omitempty"`
+	// 初回のセットアップ（ヒヅメくんの自己紹介と道具のインストール）を終えたか
+	SetupDone bool `json:"setupDone,omitempty"`
 }
 
 // 読んで書き換えて保存する間に、ほかの書き換えが割り込まないようにする
