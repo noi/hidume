@@ -3,11 +3,11 @@
 python3 hidume_sprite.py <出力ディレクトリ> [--preview <確認用ディレクトリ>]
 
 出力:
-  hidume{,_angry,_laugh,_sad}.png        32x32 透過 PNG
-  hidume{,_angry,_laugh,_sad}_x8.png     8倍
-  hidume{,_angry,_laugh,_sad}_x16.png    16倍
-  hidume{,_angry,_laugh,_sad}.svg        ベクター
-  hidume_sheet.png                       4表情を横に並べたシート（128x32 透過）
+  hidume{,_angry,_laugh,_sad,_question}.png        32x32 透過 PNG
+  hidume{,_angry,_laugh,_sad,_question}_x8.png     8倍
+  hidume{,_angry,_laugh,_sad,_question}_x16.png    16倍
+  hidume{,_angry,_laugh,_sad,_question}.svg        ベクター
+  hidume_sheet.png                                 5表情を横に並べたシート（160x32 透過）
 --preview を付けると、緑背景の確認用 PNG を指定ディレクトリに書き出す。
 """
 import math, struct, sys, zlib
@@ -35,6 +35,7 @@ PALETTE = {
     'r': (0xE8, 0x5E, 0x6B),  # 首輪のハイライト
     'h': (0x4E, 0x3B, 0x33),  # 蹄
     'K': (0x9C, 0x82, 0x72),  # 蹄の光沢
+    'Q': (0x5B, 0xA8, 0xF0),  # 疑問符
     'j': (0x3E, 0x2E, 0x28),  # 蹄の濃い影
 }
 
@@ -76,7 +77,18 @@ FACES = {
     # 悲しみ: 目を外側が下がる向きに傾ける + への字 + 涙
     'sad': _BROWS + [(10,9,'E'), (11,8,'E'), (10,14,'E'), (11,15,'E')]
            + _FROWN + [(12,8,'T'), (13,8,'T')] + _CHEEKS + _NOSE,
+    # 疑問: 顔は通常のまま（疑問符は EXTRAS で頭の右上に出す）
+    'question': _BROWS + _EYES + _CHEEKS + _NOSE + _OMEGA,
 }
+
+# ---- 頭の外に出す小物（キャンバス座標）。縁取りを付けて角の上でも読めるようにする ----
+def outlined(glyph, x0, y0, color):
+    cells = {(x0+dx, y0+dy) for dy, r in enumerate(glyph) for dx, ch in enumerate(r) if ch != '.'}
+    edge = {(x+dx, y+dy) for (x, y) in cells for dx in (-1, 0, 1) for dy in (-1, 0, 1)} - cells
+    return [(y, x, 'o') for (x, y) in edge] + [(y, x, color) for (x, y) in cells]
+
+QUESTION = ["QQQ", "..Q", ".Q.", "...", ".Q."]
+EXTRAS = {'question': outlined(QUESTION, 26, 1, 'Q')}
 
 # ---- 太い一巻きの角。光源は左上で固定（右の角は形だけ反転し、陰影は反転しない）----
 HORN_L = ["...ooooooooo", "..oYYNNNNNNN", ".oYNNNNNNNNN", "oNNNNNNoooo.", "oNNNNooNNo..",
@@ -156,6 +168,8 @@ def build(expr='normal'):
     blit(g, ear, 2, 10+OY); blit(g, mirror(ear), 25, 10+OY)
     for (y, x, ch) in FACES[expr]:   # 表情の小物は角・耳より手前に出す
         g[y+OY][x+OX] = ch
+    for (y, x, ch) in EXTRAS.get(expr, []):
+        g[y][x] = ch
     return [''.join(r) for r in g]
 
 def png(rows, scale, bg=None):
