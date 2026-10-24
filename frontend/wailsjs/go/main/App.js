@@ -170,6 +170,10 @@ export function PushGas(arg1) {
   return window['go']['main']['App']['PushGas'](arg1);
 }
 
+export function RemoveWorktree() {
+  return window['go']['main']['App']['RemoveWorktree']();
+}
+
 export function RevertTo(arg1) {
   return window['go']['main']['App']['RevertTo'](arg1);
 }

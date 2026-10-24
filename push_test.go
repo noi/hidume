@@ -1,6 +1,7 @@
 package main
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -22,6 +23,94 @@ func TestWebURL(t *testing.T) {
 		if got := webURL(remote); got != want {
 			t.Errorf("webURL(%q) = %q, want %q", remote, got, want)
 		}
+	}
+}
+
+// マージし終えたワークツリーは、ブランチごと片付けて本体に戻る。消すと困るものがあれば断る
+func TestRemoveWorktree(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	home, err := filepath.EvalSymlinks(os.Getenv("HOME"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", home)
+	commit := []string{"-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "--allow-empty", "-m"}
+	remote := filepath.Join(home, "remote.git")
+	repo := filepath.Join(home, "repo")
+	for _, step := range [][]string{
+		{"init", "-q", "--bare", remote},
+		{"init", "-q", "-b", "main", repo},
+	} {
+		if _, err := runGitIn(home, step...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, step := range [][]string{
+		append(commit, "init"),
+		{"remote", "add", "origin", remote},
+		{"push", "-q", "-u", "origin", "main"},
+	} {
+		if _, err := runGitIn(repo, step...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	worktree := filepath.Join(home, ".hidume", "worktrees", "repo-x", "noi", "done")
+	if _, err := runGitIn(repo, "worktree", "add", "-q", "-b", "noi/done", worktree); err != nil {
+		t.Fatal(err)
+	}
+	a := &App{}
+	a.setDir(worktree)
+	if !a.GetPushStatus().Managed {
+		t.Fatal("hidume のワークツリーとして扱われていない")
+	}
+
+	// まだプッシュしていないコミットがあれば断る
+	if _, err := runGitIn(worktree, append(commit, "work")...); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.RemoveWorktree(); err == nil || !strings.Contains(err.Error(), "プッシュしていない") {
+		t.Fatalf("unpushed: %v", err)
+	}
+	if _, err := runGitIn(worktree, "push", "-q", "-u", "origin", "noi/done"); err != nil {
+		t.Fatal(err)
+	}
+	// コミットしていない変更があれば断る
+	writeFiles(t, worktree, map[string]string{"note.txt": "wip"})
+	if _, err := a.RemoveWorktree(); err == nil || !strings.Contains(err.Error(), "コミットしていない") {
+		t.Fatalf("dirty: %v", err)
+	}
+	if err := os.Remove(filepath.Join(worktree, "note.txt")); err != nil {
+		t.Fatal(err)
+	}
+
+	// origin の main が進んでいたら、本体の main を早送りしておく
+	other := filepath.Join(home, "other")
+	if _, err := runGitIn(home, "clone", "-q", remote, other); err != nil {
+		t.Fatal(err)
+	}
+	for _, step := range [][]string{append(commit, "merged"), {"push", "-q", "origin", "main"}} {
+		if _, err := runGitIn(other, step...); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	got, err := a.RemoveWorktree()
+	if err != nil || got != repo || a.dir() != repo {
+		t.Fatalf("RemoveWorktree() = %q, %v (dir %q)", got, err, a.dir())
+	}
+	if _, err := os.Stat(worktree); !os.IsNotExist(err) {
+		t.Errorf("worktree still exists: %v", err)
+	}
+	if a.refExists("refs/heads/noi/done") {
+		t.Error("branch still exists")
+	}
+	if out, _ := a.runGit("log", "-1", "--format=%s", "main"); strings.TrimSpace(out) != "merged" {
+		t.Errorf("main was not fast-forwarded: %q", out)
+	}
+
+	// 本体は片付けない
+	if _, err := a.RemoveWorktree(); err == nil {
+		t.Error("main worktree must not be removed")
 	}
 }
 

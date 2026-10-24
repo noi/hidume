@@ -32,6 +32,8 @@ type PushStatus struct {
 	DefaultBranch string `json:"defaultBranch"`
 	// origin のリポジトリのページ（例: https://github.com/owner/repo）。origin がないか、URL の形がわからなければ空
 	WebURL string `json:"webUrl"`
+	// hidume が作ったワークツリーを開いているか。PR をマージし終えたら片付けられる
+	Managed bool `json:"managed"`
 }
 
 // GetPushStatus は今のブランチを push できるかどうかの情報を返す
@@ -49,6 +51,7 @@ func (a *App) GetPushStatus() PushStatus {
 		s.Upstream = strings.TrimSpace(out)
 	}
 	s.DefaultBranch = a.defaultBranch()
+	s.Managed = a.managedWorktree()
 	if !a.hasHead() {
 		return s
 	}

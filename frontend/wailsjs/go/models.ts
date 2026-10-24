@@ -259,6 +259,7 @@ export namespace main {
 	    behind: number;
 	    defaultBranch: string;
 	    webUrl: string;
+	    managed: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new PushStatus(source);
@@ -273,6 +274,7 @@ export namespace main {
 	        this.behind = source["behind"];
 	        this.defaultBranch = source["defaultBranch"];
 	        this.webUrl = source["webUrl"];
+	        this.managed = source["managed"];
 	    }
 	}
 	export class RepoSelection {

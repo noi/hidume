@@ -86,6 +86,8 @@ export function Push():Promise<void>;
 
 export function PushGas(arg1:string):Promise<void>;
 
+export function RemoveWorktree():Promise<string>;
+
 export function RevertTo(arg1:string):Promise<void>;
 
 export function SelectRepository():Promise<main.RepoSelection>;

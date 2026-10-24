@@ -42,6 +42,7 @@ import {
     PullUpstream,
     Push,
     PushGas,
+    RemoveWorktree,
     RevertTo,
     SelectRepository,
     SendChat,
@@ -569,6 +570,20 @@ function App() {
             .finally(() => setBusy(null));
     };
 
+    // マージし終えたワークツリーとブランチを片付けて、本体（最新にしたデフォルトブランチ）に戻る。
+    // コミットしていない変更やプッシュしていないコミットがあれば Go 側が断る
+    const removeWorktree = () => {
+        const done = branch;
+        setBusy(`${done} のワークツリーを片付けてるよ…`);
+        RemoveWorktree()
+            .then((dir) => switchTo(dir, `${done} を片付けて、${baseName(dir)} に戻ったよ！`))
+            .catch((e) => {
+                onError(e);
+                refresh();
+            })
+            .finally(() => setBusy(null));
+    };
+
     // 空のリポジトリには空の Initial commit を作り、そのまま作業用ブランチを作る流れに進む
     const createInitialCommit = () => {
         setBusy('最初のコミットを作ってるよ…');
@@ -941,6 +956,16 @@ ${fence}
             return {
                 text: `PR #${pr.number} がコンフリクトしてるよ。origin/${base} を取り込んで解消する？`,
                 actions: resolve,
+            };
+        }
+        if (pr?.state === 'MERGED' && pushStatus.managed) {
+            return {
+                text: `PR #${pr.number} はマージされたよ！ このワークツリー（${pushStatus.branch}）はもう使わないから、`
+                    + `片付けて ${pushStatus.defaultBranch || 'デフォルトブランチ'} に戻る？`,
+                actions: [
+                    {label: '片付ける', onClick: removeWorktree},
+                    {label: 'このまま次のブランチを作る', onClick: startBranch},
+                ],
             };
         }
         if (pr?.state === 'MERGED') {
