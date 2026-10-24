@@ -1063,7 +1063,7 @@ ${fence}
             + 'そのあと、手元に置く空のフォルダーを選んでね（その場で新しく作れるよ）';
         inputs = [{
             value: flow.url,
-            placeholder: 'https://script.google.com/home/projects/…/edit',
+            placeholder: 'https://script.google.com/home/projects/…/edit（⌘ + Enter でフォルダーを選ぶ）',
             singleLine: true,
             onChange: (url) => setGasFlow({...flow, url}),
             onSubmit: submit,
@@ -1087,7 +1087,7 @@ ${fence}
         };
         inputs = [{
             value: flow.title,
-            placeholder: 'タイトル 例: 売上レポート',
+            placeholder: 'タイトル 例: 売上レポート（⌘ + Enter でフォルダーを選ぶ）',
             singleLine: true,
             onChange: (title) => setGasFlow({...flow, title}),
             onSubmit: submit,
@@ -1214,7 +1214,7 @@ ${fence}
         speech = 'origin にするリポジトリの URL を教えて';
         inputs = [{
             value: pushFlow.value,
-            placeholder: 'https://github.com/owner/repo.git',
+            placeholder: 'https://github.com/owner/repo.git（⌘ + Enter で設定してプッシュ）',
             singleLine: true,
             onChange: (value) => setPushFlow({step: 'url', value}),
             onSubmit: submit,
@@ -1262,7 +1262,7 @@ ${fence}
         };
         inputs = [{
             value: flow.value,
-            placeholder: 'リポジトリ名',
+            placeholder: 'リポジトリ名（⌘ + Enter で作る）',
             singleLine: true,
             onChange: (value) => setPushFlow({...flow, value}),
             onSubmit: () => create(isOrg ? 'internal' : 'private'),
@@ -1297,7 +1297,7 @@ ${fence}
         inputs = [
             {
                 value: d.title,
-                placeholder: generating ? 'Claude が書いています…' : 'PR のタイトル',
+                placeholder: generating ? 'Claude が書いています…' : 'PR のタイトル（⌘ + Enter で PR を作る）',
                 disabled: generating,
                 singleLine: true,
                 onChange: (title) => setPrDraft({...d, title}),
@@ -1382,7 +1382,7 @@ ${fence}
         speech = `${from} から作業用のブランチをワークツリーで作るよ。名前を教えて（頭に ${d.prefix}/ が付くよ）`;
         inputs = [{
             value: d.name,
-            placeholder: '例: add-login',
+            placeholder: '例: add-login（⌘ + Enter で作る）',
             singleLine: true,
             onChange: (value) => setBranchDraft({...d, name: value}),
             onSubmit: () => createBranch(d),

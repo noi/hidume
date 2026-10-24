@@ -58,7 +58,7 @@ export type SpeechAction = {
     danger?: boolean;
 };
 
-// 複数行で入力し ⌘ / Ctrl + Enter で確定する。singleLine なら 1 行で Enter で確定。Esc でやめる
+// 複数行で入力する。singleLine なら 1 行。どちらも ⌘ / Ctrl + Enter で確定し、Esc でやめる
 export type SpeechInput = {
     value: string;
     placeholder: string;
@@ -120,7 +120,7 @@ export function Mascot({speech, actions, inputs, options, select, loading, sad}:
                            placeholder={input.placeholder} disabled={input.disabled} spellCheck={false}
                            onChange={(e) => input.onChange(e.target.value)}
                            onKeyDown={(e) => {
-                               if (isEnter(e)) input.onSubmit();
+                               if (isEnter(e) && (e.metaKey || e.ctrlKey)) input.onSubmit();
                                if (e.key === 'Escape') input.onCancel();
                            }}/>
                 ) : (
