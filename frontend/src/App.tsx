@@ -130,7 +130,6 @@ type PullRequestDraft = {
     base: string;
     title: string;
     body: string;
-    draft: boolean;
     // Claude が書いた文面が入っているか
     byClaude: boolean;
 };
@@ -736,7 +735,7 @@ function App() {
     const startPullRequest = () => {
         const id = ++generation.current;
         setGenerating(false);
-        setPrDraft({bases: null, base: '', title: '', body: '', draft: false, byClaude: false});
+        setPrDraft({bases: null, base: '', title: '', body: '', byClaude: false});
         GetPullRequestDefaults()
             .then(({bases, title, body}) => {
                 if (id !== generation.current) return;
@@ -761,8 +760,9 @@ function App() {
         if (!title || generating) return;
         closePrDraft();
         setBusy('PR を作ってるよ…');
-        CreatePullRequest(d.base, title, d.body.trim(), d.draft)
-            .then(() => setReaction(d.draft ? '下書きの PR を作ったよ！' : 'PR を作ったよ！'))
+        // 下書き（Draft）の PR は、エンジニアでない人には違いがわかりにくいので作らない
+        CreatePullRequest(d.base, title, d.body.trim(), false)
+            .then(() => setReaction('PR を作ったよ！'))
             .catch(onError)
             .finally(() => {
                 setBusy(null);
@@ -1314,14 +1314,7 @@ ${fence}
                 onCancel: closePrDraft,
             },
         ];
-        options = [
-            {
-                label: '下書き（Draft）で作る',
-                checked: d.draft,
-                onChange: (draft) => setPrDraft({...d, draft}),
-            },
-            autoClaudeOption,
-        ];
+        options = [autoClaudeOption];
         actions = [
             {label: 'PR を作る', onClick: () => createPullRequest(d), disabled: generating || !d.title.trim()},
             {label: 'Claude に書かせる', onClick: () => writePullRequestWithClaude(d.base), disabled: generating},
