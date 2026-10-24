@@ -1589,7 +1589,8 @@ ${fence}
                 </div>
                 <ChatPane repo={repo ?? ''} label={branch || baseName(repo ?? '') || ''} onError={onError}/>
                 <CommitTree commits={commits} selected={pickedCommit} onSelect={setPickedCommit}
-                            canRevert={revert.target !== null} onRevert={() => setConfirmingRevert(true)}/>
+                            canRevert={revert.target !== null} onRevert={() => setConfirmingRevert(true)}
+                            webUrl={pushStatus?.webUrl ?? ''} onOpen={(url) => OpenURL(url).catch(onError)}/>
             </main>
         </div>
     )
@@ -2030,13 +2031,23 @@ function GasPane({project, branch, busy, onPush, onPull, onOpen}: {
     );
 }
 
-function CommitTree({commits, selected, onSelect, canRevert, onRevert}: {
+function CommitTree({commits, selected, onSelect, canRevert, onRevert, webUrl, onOpen}: {
     commits: main.Commit[];
     selected: string | null;
     onSelect: (hash: string) => void;
     canRevert: boolean;
     onRevert: () => void;
+    // origin のリポジトリのページ。わからなければ空
+    webUrl: string;
+    onOpen: (url: string) => void;
 }) {
+    // 差分はプッシュ済みのコミットだけ、GitHub のコミットのページで見る
+    const picked = commits.find((c) => c.hash === selected);
+    const canView = !!picked && !picked.unpushed && !!webUrl;
+    const viewTitle = !picked ? '差分を見たいコミットを選んでね'
+        : !webUrl ? 'origin がないので開けないよ'
+            : picked.unpushed ? 'まだプッシュしていないコミットだよ。プッシュすると見られるよ'
+                : 'このコミットの差分をブラウザで開く';
     // 今のブランチ（HEAD から辿れる）コミット
     const current = useMemo(() => {
         const byHash = new Map(commits.map((c) => [c.hash, c]));
@@ -2108,9 +2119,15 @@ function CommitTree({commits, selected, onSelect, canRevert, onRevert}: {
                 </div>
             </div>
             {/* スクロールしても右下に残す */}
-            <button className="revert-button" disabled={!canRevert}
-                    title={canRevert ? '選んだコミットの状態まで戻すコミットを作る' : '戻したいコミットを選んでね'}
-                    onClick={onRevert}>リバート</button>
+            <div className="tree-actions">
+                <button className="view-button" disabled={!canView} title={viewTitle}
+                        onClick={() => picked && onOpen(`${webUrl}/commit/${picked.hash}`)}>
+                    {webUrl && new URL(webUrl).hostname !== 'github.com' ? 'ブラウザで差分を見る' : 'GitHub で差分を見る'}
+                </button>
+                <button className="revert-button" disabled={!canRevert}
+                        title={canRevert ? '選んだコミットの状態まで戻すコミットを作る' : '戻したいコミットを選んでね'}
+                        onClick={onRevert}>リバート</button>
+            </div>
         </section>
     );
 }

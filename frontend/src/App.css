@@ -911,11 +911,36 @@
     background-color: rgba(79, 195, 247, 0.25);
 }
 
-/* 下のコミットが透けないよう、背景色は不透明にする */
-.revert-button {
+/* コミットツリーの右下に並べるボタン */
+.tree-actions {
     position: absolute;
     right: 16px;
     bottom: 12px;
+    display: flex;
+    gap: 8px;
+}
+
+/* 下のコミットが透けないよう、背景色は不透明にする */
+.view-button {
+    padding: 6px 14px;
+    border: 1px solid rgba(79, 195, 247, 0.6);
+    border-radius: 4px;
+    background-color: #1b2636;
+    color: #4fc3f7;
+    cursor: pointer;
+}
+
+.view-button:hover:not(:disabled) {
+    background-color: #22364a;
+}
+
+.view-button:disabled {
+    border-color: rgba(255, 255, 255, 0.15);
+    color: rgba(255, 255, 255, 0.3);
+    cursor: default;
+}
+
+.revert-button {
     padding: 6px 14px;
     border: 1px solid rgba(229, 115, 115, 0.6);
     border-radius: 4px;
