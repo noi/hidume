@@ -43,10 +43,13 @@ jobs:
       - name: Test
         run: go test ./...
 
-      # .app はディレクトリなので、シンボリックリンクや属性を保ったまま ditto で zip にする
+      # アプリと「アプリケーション」フォルダへのリンクを並べた dmg にする
       - name: Package
         run: |
-          ditto -c -k --keepParent build/bin/hidume.app "hidume-${GITHUB_REF_NAME}-macos-universal.zip"
+          mkdir dmg
+          cp -R build/bin/hidume.app dmg/
+          ln -s /Applications dmg/Applications
+          hdiutil create -volname hidume -srcfolder dmg -format UDZO "hidume-${GITHUB_REF_NAME}-macos-universal.dmg"
 
       - name: Create release
         env:
@@ -60,4 +63,4 @@ jobs:
             --verify-tag \
             --generate-notes \
             $PRERELEASE \
-            "hidume-${GITHUB_REF_NAME}-macos-universal.zip"
+            "hidume-${GITHUB_REF_NAME}-macos-universal.dmg"
