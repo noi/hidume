@@ -66,8 +66,13 @@ git tag v0.1.0
 git push origin v0.1.0
 ```
 
-署名と公証はしていないので、ダウンロードしたアプリは初回に Gatekeeper に止められる。
-`xattr -dr com.apple.quarantine hidume.app` で隔離属性を外すか、Finder で右クリックして「開く」を選ぶ。
+署名と公証はしていないので、ダウンロードしたアプリは初回に Gatekeeper に止められる。次のどちらかで開けるようになる。
+
+- システム設定の「プライバシーとセキュリティ」で、「"hidume" は Mac を保護するためにブロックされました」の横の
+  「このまま開く」を押す（止められてから 1 時間ほどしか表示されない）
+- `xattr -dr com.apple.quarantine /Applications/hidume.app` で隔離属性を外す
+
+macOS 15 以降は、Finder で右クリックして「開く」を選んでも開けない。
 
 ### テスト
 
