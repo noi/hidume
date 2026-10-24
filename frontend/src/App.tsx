@@ -6,9 +6,12 @@ import {
     Commit,
     ContinueMerge,
     ClearRepository,
+    CloneGasScript,
     CommitAll,
     CompleteSetup,
+    ConfirmGasAPI,
     CreateBranch,
+    CreateGasScript,
     CreateInitialCommit,
     CreateGitHubRepository,
     CreatePullRequest,
@@ -18,7 +21,10 @@ import {
     GeneratePullRequest,
     GetBranchPrefix,
     GetCommits,
+    GetGasProject,
+    GetGasSetup,
     GetGitHubOwners,
+    GetHistory,
     GetMergeStatus,
     GetPullRequest,
     GetPullRequestDefaults,
@@ -27,17 +33,22 @@ import {
     GetSetup,
     GetStatus,
     PrepareForcePush,
+    PrepareGasPush,
     InitRepository,
     InstallTool,
     ListWorktrees,
     MergeBase,
     OpenURL,
+    PullGas,
     PullUpstream,
     Push,
+    PushGas,
+    RemoveWorktree,
     RevertTo,
     SelectRepository,
     SendChat,
     SetOrigin,
+    SwitchHistory,
     SwitchWorktree,
     Stage,
     StageAll,
@@ -122,7 +133,6 @@ type PullRequestDraft = {
     base: string;
     title: string;
     body: string;
-    draft: boolean;
     // Claude が書いた文面が入っているか
     byClaude: boolean;
 };
@@ -136,8 +146,10 @@ type PullRequestState = {
 
 const AUTO_CLAUDE_KEY = 'hidume.autoClaude';
 
-// 初回のセットアップ。hello はヒヅメくんの自己紹介、tools は足りない道具やログインを順に済ませているところ
+// セットアップ。hello はヒヅメくんの自己紹介、tools は足りない道具やログインを順に済ませているところ。
+// kind が app なら初回起動時のもの、gas なら「GAS を始める」を押したときの GAS 用のもの
 type SetupFlow = {
+    kind: 'app' | 'gas';
     step: 'hello' | 'tools';
     status: main.SetupStatus;
     // 「あとで」にしたもの
@@ -199,7 +211,55 @@ const SETUP_ITEMS: Record<string, SetupItem> = {
         waiting: 'ターミナルで Claude にログインしてるよ。開いたブラウザで、Claude のアカウントでログインしてね。終わったら教えてね',
         needs: 'claude',
     },
+    // ここからは GAS を始めるときの準備
+    node: {
+        label: 'Node.js',
+        ask: 'Node.js がまだないみたい。GAS とやりとりする道具（clasp）を動かすのに要るんだ。入れていい？',
+        done: 'Node.js を入れたよ！',
+    },
+    clasp: {
+        label: 'clasp',
+        ask: 'clasp がまだないか、古いみたい。Google 公式の、GAS と手元のファイルをやりとりする道具だよ。入れていい？',
+        done: 'clasp を入れたよ！',
+        needs: 'node',
+    },
+    'clasp-auth': {
+        label: 'Google へのログイン',
+        ask: 'clasp で Google にまだログインしてないみたい。ターミナルが開くから、そこでログインしてね。ログインする？',
+        done: 'Google にログインできたよ！',
+        waiting: 'ターミナルで Google にログインしてるよ。開いたブラウザで、GAS を使う Google アカウントを選んで許可してね。終わったら教えてね',
+        needs: 'clasp',
+    },
+    'gas-api': {
+        label: 'Apps Script API の有効化',
+        ask: 'Apps Script API を有効にしてね。手元から GAS を読み書きするのに要るんだ。設定のページを開いていい？',
+        done: 'Apps Script API を有効にしたよ！',
+        waiting: '開いたページで「Google Apps Script API」をオンにしてね。会社のアカウントで変えられないときは、'
+            + '情報システムの担当の人に相談してね。オンにしたら教えてね',
+    },
 };
+
+// GAS の新規作成で選べる種類。value は clasp create-script の --type
+const GAS_TYPES = [
+    {value: 'sheets', label: 'スプレッドシート'},
+    {value: 'docs', label: 'ドキュメント'},
+    {value: 'slides', label: 'スライド'},
+    {value: 'forms', label: 'フォーム'},
+    {value: 'standalone', label: 'スクリプトだけ'},
+];
+const GAS_SETTINGS_URL = 'https://script.google.com/home/usersettings';
+// clasp のエラーのうち、ボタンで次の一手を出せるもの
+const isGasApiDisabled = (e: string) => e.includes('Apps Script API が有効になっていません');
+const isGasLoggedOut = (e: string) => e.includes('Google にログインしていないか');
+
+// GAS を始める流れと、GAS への反映・取り込みの確認
+type GasFlow =
+    | { step: 'menu' }
+    | { step: 'clone'; url: string }
+    | { step: 'create'; kind: string; title: string }
+    // 反映の確認。plan は GAS 側を確かめている間は null
+    | { step: 'push'; plan: main.GasPushPlan | null }
+    | { step: 'pull' };
 // ターミナルでやっていることが終わったかを確かめる間隔
 const SETUP_POLL_MS = 3000;
 
@@ -255,6 +315,9 @@ function App() {
     // push など時間のかかる操作の最中に、ヒヅメくんが言うこと
     const [busy, setBusy] = useState<string | null>(null);
     const [setup, setSetup] = useState<SetupFlow | null>(null);
+    // 開いているリポジトリに紐づく GAS。.clasp.json がなければ null
+    const [gasProject, setGasProject] = useState<main.GasProject | null>(null);
+    const [gasFlow, setGasFlow] = useState<GasFlow | null>(null);
 
     useEffect(() => {
         if (!reaction) return;
@@ -283,16 +346,23 @@ function App() {
                     setCommits([]);
                     setPushStatus(null);
                     setMergeStatus(null);
+                    setGasProject(null);
                     setDelegatedMerge(false);
                     setLoadError('');
                     return;
                 }
-                return Promise.all([GetStatus(), GetCommits(COMMIT_LIMIT), GetPushStatus(), GetMergeStatus()])
-                    .then(([s, c, p, m]) => {
+                // .clasp.json が壊れていても git の表示は続けられるよう、GAS の失敗はエラーを出すだけにする
+                const gas = GetGasProject().catch((e) => {
+                    onError(e);
+                    return null;
+                });
+                return Promise.all([GetStatus(), GetCommits(COMMIT_LIMIT), GetPushStatus(), GetMergeStatus(), gas])
+                    .then(([s, c, p, m, g]) => {
                         setStatus(s);
                         setCommits(c);
                         setPushStatus(p);
                         setMergeStatus(m);
+                        setGasProject(g ?? null);
                         if (!m.merging) setDelegatedMerge(false);
                         setLoadError('');
                     });
@@ -315,6 +385,7 @@ function App() {
         closePrDraft();
         setBranchDraft(null);
         setSecretCheck(null);
+        setGasFlow(null);
         setReaction(message);
         refresh();
     };
@@ -354,9 +425,9 @@ function App() {
     };
 
     // 済んだかを確かめ直す。ターミナルでやっていたことが済んでいたら待つのをやめる
-    const checkSetup = (done?: string) => GetSetup()
+    const checkSetup = (kind: SetupFlow['kind'], done?: string) => (kind === 'gas' ? GetGasSetup() : GetSetup())
         .then((status) => setSetup((s) => {
-            if (s?.step !== 'tools') return s;
+            if (s?.step !== 'tools' || s.kind !== kind) return s;
             if (s.waiting && status.tools.find((t) => t.name === s.waiting)?.installed) {
                 return {...s, status, waiting: null, done: SETUP_ITEMS[s.waiting].done};
             }
@@ -365,7 +436,7 @@ function App() {
         .catch(onError);
 
     // パスワードやブラウザでの操作が要るものはターミナルで始め、ほかは brew で入れ終わるまで待つ
-    const installTool = (name: string) => {
+    const installTool = (kind: SetupFlow['kind'], name: string) => {
         const item = SETUP_ITEMS[name];
         setError('');
         if (item.waiting) {
@@ -376,10 +447,17 @@ function App() {
         }
         setBusy(`${item.label} を入れてるよ…（数分かかることもあるよ）`);
         InstallTool(name)
-            .then(() => checkSetup(item.done))
+            .then(() => checkSetup(kind, item.done))
             .catch(onError)
             .finally(() => setBusy(null));
     };
+
+    // ターミナルやブラウザでやってもらっていたことを「終わった」と言われたとき。
+    // Apps Script API は有効になったかを確かめられないので、答えを覚えてから確かめ直す
+    const finishWaiting = (kind: SetupFlow['kind'], name: string) =>
+        (name === 'gas-api' ? ConfirmGasAPI() : Promise.resolve())
+            .then(() => checkSetup(kind))
+            .catch(onError);
 
     const skipTool = (name: string) => {
         setError('');
@@ -393,6 +471,59 @@ function App() {
         // git がなくて読めていなかった情報を読み直す
         refresh();
     };
+
+    // GAS に要る道具やログインがそろっていれば、取り込むか新しく作るかを聞く。足りなければその準備から始める
+    const startGas = () => {
+        setError('');
+        setBusy('GAS を使う準備ができてるか確かめてるよ…');
+        GetGasSetup()
+            .then((status) => status.done
+                ? setGasFlow({step: 'menu'})
+                : setSetup({kind: 'gas', step: 'tools', status, skipped: [], waiting: null, done: null}))
+            .catch(onError)
+            .finally(() => setBusy(null));
+    };
+
+    // 置くフォルダーはダイアログで選ぶ（新しく作ってもよい）。選ぶのをやめたら、入力したところに戻る
+    const runGasNew = (flow: GasFlow & { step: 'clone' | 'create' }) => {
+        setGasFlow(null);
+        setBusy(flow.step === 'clone' ? '置くフォルダーを選んでね。選んだら GAS を取り込むよ…' : '置くフォルダーを選んでね。選んだら GAS を作るよ…');
+        (flow.step === 'clone' ? CloneGasScript(flow.url.trim()) : CreateGasScript(flow.title.trim(), flow.kind))
+            .then((dir) => dir
+                ? switchTo(dir, flow.step === 'clone' ? `${baseName(dir)} に GAS を取り込んだよ！` : `${baseName(dir)} に GAS を作ったよ！`)
+                : setGasFlow(flow))
+            .catch(onError)
+            .finally(() => setBusy(null));
+    };
+
+    // ブラウザのエディタでの変更を消さないよう、反映の前に GAS 側の今の中身を確かめる
+    const startGasPush = () => {
+        setError('');
+        setGasFlow({step: 'push', plan: null});
+        PrepareGasPush()
+            .then((plan) => setGasFlow((f) => f?.step === 'push' ? {...f, plan} : f))
+            .catch((e) => {
+                setGasFlow(null);
+                onError(e);
+            });
+    };
+
+    const runGas = (message: string, step: () => Promise<void>, done: string) => {
+        setGasFlow(null);
+        setBusy(message);
+        step()
+            .then(() => setReaction(done))
+            .catch(onError)
+            .finally(() => {
+                setBusy(null);
+                refresh();
+            });
+    };
+
+    const runGasPush = (expected: string) => runGas('GAS に反映してるよ…', () => PushGas(expected),
+        'GAS に反映したよ！ シートやエディタで試してみてね');
+    const runGasPull = () => runGas('GAS の中身を取り込んでるよ…', PullGas,
+        'GAS の中身を取り込んだよ！ 変わったところを確かめてからコミットしてね');
 
     const stageAll = () => {
         const count = status.filter((e) => e.workTree !== ' ').length;
@@ -434,6 +565,20 @@ function App() {
         setBusy('ワークツリーを作ってるよ…');
         CreateBranch(name, onDefault && d.carry && status.length > 0)
             .then((dir) => switchTo(dir, `${d.prefix}/${name} のワークツリーを作って開いたよ！`))
+            .catch((e) => {
+                onError(e);
+                refresh();
+            })
+            .finally(() => setBusy(null));
+    };
+
+    // マージし終えたワークツリーとブランチを片付けて、本体（最新にしたデフォルトブランチ）に戻る。
+    // コミットしていない変更やプッシュしていないコミットがあれば Go 側が断る
+    const removeWorktree = () => {
+        const done = branch;
+        setBusy(`${done} のワークツリーを片付けてるよ…`);
+        RemoveWorktree()
+            .then((dir) => switchTo(dir, `${done} を片付けて、${baseName(dir)} に戻ったよ！`))
             .catch((e) => {
                 onError(e);
                 refresh();
@@ -607,7 +752,7 @@ function App() {
     const startPullRequest = () => {
         const id = ++generation.current;
         setGenerating(false);
-        setPrDraft({bases: null, base: '', title: '', body: '', draft: false, byClaude: false});
+        setPrDraft({bases: null, base: '', title: '', body: '', byClaude: false});
         GetPullRequestDefaults()
             .then(({bases, title, body}) => {
                 if (id !== generation.current) return;
@@ -632,8 +777,9 @@ function App() {
         if (!title || generating) return;
         closePrDraft();
         setBusy('PR を作ってるよ…');
-        CreatePullRequest(d.base, title, d.body.trim(), d.draft)
-            .then(() => setReaction(d.draft ? '下書きの PR を作ったよ！' : 'PR を作ったよ！'))
+        // 下書き（Draft）の PR は、エンジニアでない人には違いがわかりにくいので作らない
+        CreatePullRequest(d.base, title, d.body.trim(), false)
+            .then(() => setReaction('PR を作ったよ！'))
             .catch(onError)
             .finally(() => {
                 setBusy(null);
@@ -814,6 +960,16 @@ ${fence}
                 actions: resolve,
             };
         }
+        if (pr?.state === 'MERGED' && pushStatus.managed) {
+            return {
+                text: `PR #${pr.number} はマージされたよ！ このワークツリー（${pushStatus.branch}）はもう使わないから、`
+                    + `片付けて ${pushStatus.defaultBranch || 'デフォルトブランチ'} に戻る？`,
+                actions: [
+                    {label: '片付ける', onClick: removeWorktree},
+                    {label: 'このまま次のブランチを作る', onClick: startBranch},
+                ],
+            };
+        }
         if (pr?.state === 'MERGED') {
             return {
                 text: `PR #${pr.number} はマージされたよ！ 次の作業用ブランチを作る？`,
@@ -863,10 +1019,23 @@ ${fence}
         const done = setup.done ? `${setup.done} ` : '';
         const item = tool && SETUP_ITEMS[tool.name];
         const needs = item?.needs && missing.some((t) => t.name === item.needs) ? SETUP_ITEMS[item.needs] : null;
+        const later = missing.map((t) => SETUP_ITEMS[t.name].label).join('、');
         if (busy) {
             speech = busy;
+        } else if ((!tool || !item) && setup.kind === 'gas') {
+            // GAS は道具が 1 つでも欠けると使えないので、あとでにしたものがあれば先へ進まない
+            speech = done + (later
+                ? `${later}が済んでないと GAS は使えないよ。準備ができたら、もう一度「GAS を始める」を押してね`
+                : 'GAS を使う準備ができたよ！');
+            actions = later
+                ? [{label: 'わかった', onClick: () => setSetup(null)}]
+                : [{
+                    label: '次へ', onClick: () => {
+                        setSetup(null);
+                        setGasFlow({step: 'menu'});
+                    },
+                }];
         } else if (!tool || !item) {
-            const later = missing.map((t) => SETUP_ITEMS[t.name].label).join('、');
             speech = done + (later
                 ? `${later}はあとでやってね。それじゃあ、さっそく使ってみよう！`
                 : '準備は全部そろってるよ。さっそく使ってみよう！');
@@ -875,13 +1044,13 @@ ${fence}
             speech = `${item.label}がうまくいかなかった… もう一度やってみる？`;
             sad = true;
             actions = [
-                {label: 'もう一度', onClick: () => installTool(tool.name)},
+                {label: 'もう一度', onClick: () => installTool(setup.kind, tool.name)},
                 {label: 'あとで', onClick: () => skipTool(tool.name)},
             ];
         } else if (setup.waiting === tool.name && item.waiting) {
             speech = item.waiting;
             actions = [
-                {label: '終わった', onClick: () => checkSetup()},
+                {label: '終わった', onClick: () => finishWaiting(setup.kind, tool.name)},
                 {label: 'あとで', onClick: () => skipTool(tool.name)},
             ];
         } else if (needs) {
@@ -891,7 +1060,10 @@ ${fence}
             const login = tool.name.endsWith('-auth');
             speech = done + item.ask;
             actions = [
-                {label: login ? 'ログインする' : '入れる', onClick: () => installTool(tool.name)},
+                {
+                    label: tool.name === 'gas-api' ? '開く' : login ? 'ログインする' : '入れる',
+                    onClick: () => installTool(setup.kind, tool.name),
+                },
                 {label: 'あとで', onClick: () => skipTool(tool.name)},
             ];
         }
@@ -903,6 +1075,91 @@ ${fence}
         ];
     } else if (busy) {
         speech = busy;
+    } else if (gasFlow?.step === 'menu') {
+        speech = 'GAS（Apps Script）のプロジェクトを用意しよう。今あるスクリプトを取り込む？ それとも新しく作る？';
+        actions = [
+            {label: '今あるものを取り込む', onClick: () => setGasFlow({step: 'clone', url: ''})},
+            {label: '新しく作る', onClick: () => setGasFlow({step: 'create', kind: 'sheets', title: ''})},
+            {label: 'やめる', onClick: () => setGasFlow(null)},
+        ];
+    } else if (gasFlow?.step === 'clone') {
+        const flow = gasFlow;
+        const ready = !!flow.url.trim();
+        const submit = () => ready && runGasNew(flow);
+        speech = '取り込むスクリプトのエディタの URL を教えて。スプレッドシートのメニューの「拡張機能」→「Apps Script」で開けるよ。'
+            + 'そのあと、手元に置く空のフォルダーを選んでね（その場で新しく作れるよ）';
+        inputs = [{
+            value: flow.url,
+            placeholder: 'https://script.google.com/home/projects/…/edit（⌘ + Enter でフォルダーを選ぶ）',
+            singleLine: true,
+            onChange: (url) => setGasFlow({...flow, url}),
+            onSubmit: submit,
+            onCancel: () => setGasFlow(null),
+        }];
+        actions = [
+            {label: 'フォルダーを選んで取り込む', onClick: submit, disabled: !ready},
+            {label: 'やめる', onClick: () => setGasFlow(null)},
+        ];
+    } else if (gasFlow?.step === 'create') {
+        const flow = gasFlow;
+        const ready = !!flow.title.trim();
+        const submit = () => ready && runGasNew(flow);
+        speech = '新しく GAS を作るよ。種類とタイトルを教えて。スプレッドシートなどを選ぶと、Google ドライブにそれも作るよ。'
+            + 'そのあと、手元に置く空のフォルダーを選んでね（その場で新しく作れるよ）';
+        select = {
+            label: '種類',
+            value: flow.kind,
+            options: GAS_TYPES,
+            onChange: (kind) => setGasFlow({...flow, kind}),
+        };
+        inputs = [{
+            value: flow.title,
+            placeholder: 'タイトル 例: 売上レポート（⌘ + Enter でフォルダーを選ぶ）',
+            singleLine: true,
+            onChange: (title) => setGasFlow({...flow, title}),
+            onSubmit: submit,
+            onCancel: () => setGasFlow(null),
+        }];
+        actions = [
+            {label: 'フォルダーを選んで作る', onClick: submit, disabled: !ready},
+            {label: 'やめる', onClick: () => setGasFlow(null)},
+        ];
+    } else if (gasFlow?.step === 'push' && !gasFlow.plan) {
+        speech = 'GAS の今の中身を確かめてるよ…';
+        actions = [{label: 'やめる', onClick: () => setGasFlow(null)}];
+    } else if (gasFlow?.step === 'push' && gasFlow.plan) {
+        const plan = gasFlow.plan;
+        const push = {label: '反映する', onClick: () => runGasPush(plan.expected)};
+        const cancel = {label: 'やめる', onClick: () => setGasFlow(null)};
+        const what = `${plan.branch || 'この作業ツリー'}${plan.commit ? ` の ${plan.commit}` : ''}`
+            + (plan.dirty ? '（コミットしていない変更も含む）' : '');
+        if (plan.unchanged) {
+            speech = '手元と GAS の中身は同じだよ。反映するものはないよ';
+            actions = [{label: 'わかった', onClick: () => setGasFlow(null)}];
+        } else if (plan.overwritten.length > 0) {
+            const shown = plan.overwritten.slice(0, 3).map(baseName).join('、')
+                + (plan.overwritten.length > 3 ? ` ほか ${plan.overwritten.length - 3} 件` : '');
+            const lost = plan.lost.length > 0 ? `（そのうち ${plan.lost.length} 件は手元にないから消えちゃう）` : '';
+            speech = `ブラウザのエディタで変更されたファイルがあるよ: ${shown}${lost}。`
+                + 'このまま反映すると、その変更は上書きされて消えちゃう。先に GAS から取り込む？';
+            actions = [
+                {label: '先に取り込む', onClick: () => setGasFlow({step: 'pull'})},
+                {label: '上書きして反映する', danger: true, onClick: () => runGasPush(plan.expected)},
+                cancel,
+            ];
+        } else if (plan.lastBranch && plan.branch && plan.lastBranch !== plan.branch) {
+            speech = `今 GAS に入っているのは ${plan.lastBranch} の内容だよ。${what}で置き換えるけど、いい？`;
+            actions = [push, cancel];
+        } else {
+            speech = `${what}を GAS に反映するよ。いい？`;
+            actions = [push, cancel];
+        }
+    } else if (gasFlow?.step === 'pull') {
+        speech = `GAS の今の中身を手元の ${gasProject?.rootDir ?? 'src'} に取り込むよ。違うところは変更として出るから、確かめてからコミットしてね。いい？`;
+        actions = [
+            {label: '取り込む', onClick: runGasPull},
+            {label: 'やめる', onClick: () => setGasFlow(null)},
+        ];
     } else if (mergeStatus?.merging && conflicts.length > 0 && delegatedMerge) {
         speech = `コンフリクトの解消を Claude にお願いしたよ。右のパネルで様子を見てね（残り ${conflicts.length} 件）`;
         actions = [{label: 'マージをやめる', onClick: abortMerge}];
@@ -984,7 +1241,7 @@ ${fence}
         speech = 'origin にするリポジトリの URL を教えて';
         inputs = [{
             value: pushFlow.value,
-            placeholder: 'https://github.com/owner/repo.git',
+            placeholder: 'https://github.com/owner/repo.git（⌘ + Enter で設定してプッシュ）',
             singleLine: true,
             onChange: (value) => setPushFlow({step: 'url', value}),
             onSubmit: submit,
@@ -1032,7 +1289,7 @@ ${fence}
         };
         inputs = [{
             value: flow.value,
-            placeholder: 'リポジトリ名',
+            placeholder: 'リポジトリ名（⌘ + Enter で作る）',
             singleLine: true,
             onChange: (value) => setPushFlow({...flow, value}),
             onSubmit: () => create(isOrg ? 'internal' : 'private'),
@@ -1067,7 +1324,7 @@ ${fence}
         inputs = [
             {
                 value: d.title,
-                placeholder: generating ? 'Claude が書いています…' : 'PR のタイトル',
+                placeholder: generating ? 'Claude が書いています…' : 'PR のタイトル（⌘ + Enter で PR を作る）',
                 disabled: generating,
                 singleLine: true,
                 onChange: (title) => setPrDraft({...d, title}),
@@ -1084,14 +1341,7 @@ ${fence}
                 onCancel: closePrDraft,
             },
         ];
-        options = [
-            {
-                label: '下書き（Draft）で作る',
-                checked: d.draft,
-                onChange: (draft) => setPrDraft({...d, draft}),
-            },
-            autoClaudeOption,
-        ];
+        options = [autoClaudeOption];
         actions = [
             {label: 'PR を作る', onClick: () => createPullRequest(d), disabled: generating || !d.title.trim()},
             {label: 'Claude に書かせる', onClick: () => writePullRequestWithClaude(d.base), disabled: generating},
@@ -1152,7 +1402,7 @@ ${fence}
         speech = `${from} から作業用のブランチをワークツリーで作るよ。名前を教えて（頭に ${d.prefix}/ が付くよ）`;
         inputs = [{
             value: d.name,
-            placeholder: '例: add-login',
+            placeholder: '例: add-login（⌘ + Enter で作る）',
             singleLine: true,
             onChange: (value) => setBranchDraft({...d, name: value}),
             onSubmit: () => createBranch(d),
@@ -1171,13 +1421,25 @@ ${fence}
         ];
     } else if (reaction) {
         speech = reaction;
+    } else if (error && isGasApiDisabled(error)) {
+        speech = 'Apps Script API がオフになってるみたい。設定のページでオンにして、数分たってからもう一度やってみてね';
+        sad = true;
+        actions = [{label: '設定を開く', onClick: () => OpenURL(GAS_SETTINGS_URL).catch(onError)}];
+    } else if (error && isGasLoggedOut(error)) {
+        speech = 'Google へのログインが切れてるみたい。ターミナルでログインし直してから、もう一度やってみてね';
+        sad = true;
+        actions = [{label: 'ログインする', onClick: () => InstallTool('clasp-auth').catch(onError)}];
     } else if (error || loadError) {
         speech = `${describeError(error || loadError)} Claude に見てもらう？`;
         sad = true;
         actions = [{label: 'Claude に解消してもらう', onClick: () => delegateError(error || loadError)}];
     } else if (repo === '') {
-        speech = 'リポジトリを選んでね。git リポジトリじゃないフォルダなら、git init もできるよ';
-        actions = [{label: 'リポジトリを選ぶ', onClick: selectRepository}];
+        speech = 'リポジトリを選んでね。git リポジトリじゃないフォルダなら、git init もできるよ。'
+            + 'GAS（Apps Script）を取り込んで始めることもできるよ';
+        actions = [
+            {label: 'リポジトリを選ぶ', onClick: selectRepository},
+            {label: 'GAS を始める', onClick: startGas},
+        ];
     } else if (unborn && branch) {
         speech = 'まだコミットがないよ。空の最初のコミットを作って、作業用のブランチを切ろうか？';
         actions = [
@@ -1208,18 +1470,19 @@ ${fence}
     useEffect(() => {
         GetSetup()
             .then((status) => {
-                if (!status.done) setSetup({step: 'hello', status, skipped: [], waiting: null, done: null});
+                if (!status.done) setSetup({kind: 'app', step: 'hello', status, skipped: [], waiting: null, done: null});
             })
             .catch(onError);
     }, []);
 
     // ターミナルでやっている間は、済んだかを定期的に確かめる
     const waitingTerminal = setup?.waiting ?? null;
+    const setupKind = setup?.kind ?? 'app';
     useEffect(() => {
         if (!waitingTerminal) return;
-        const timer = setInterval(() => checkSetup(), SETUP_POLL_MS);
+        const timer = setInterval(() => checkSetup(setupKind), SETUP_POLL_MS);
         return () => clearInterval(timer);
-    }, [waitingTerminal]);
+    }, [waitingTerminal, setupKind]);
 
     // ローカルの変化は Go 側の監視が知らせてくる。PR は定期的に、ウィンドウに戻ったときにも確認する
     useEffect(() => {
@@ -1249,6 +1512,7 @@ ${fence}
                         loading={busy !== null || (draft !== null && generating)
                             || (pushFlow?.step === 'create' && !pushFlow.owners)
                             || (pushFlow?.step === 'force' && !pushFlow.plan)
+                            || (gasFlow?.step === 'push' && !gasFlow.plan)
                             || (prDraft !== null && (!prDraft.bases || generating))
                             || (branchDraft !== null && !branchDraft.prefix)}/>
                 {/* 右端は 2 段にして、作業ディレクトリのパスもマスコットの高さの中に収める */}
@@ -1268,6 +1532,10 @@ ${fence}
                                       defaultBranch={pushStatus?.defaultBranch ?? ''}
                                       disabled={!repo || unborn || busy !== null}
                                       onSwitch={switchWorktree} onCreate={startBranch} onError={onError}/>
+                        <HistoryMenu disabled={busy !== null} onError={onError}
+                                     onSwitch={(e) => SwitchHistory(e.path)
+                                         .then((dir) => switchTo(dir, `${e.repo}（${e.branch || 'ブランチなし'}）に切り替えたよ`))
+                                         .catch(onError)}/>
                     </div>
                     {/* 開いている作業ディレクトリ（ワークツリー）のフルパス */}
                     {repo && (
@@ -1289,7 +1557,18 @@ ${fence}
             <main className="panes">
                 <RemotePane push={pushStatus} merge={mergeStatus} pullRequest={pullRequest} busy={busy !== null}
                             onCreatePullRequest={startPullRequest}
-                            onOpen={(url) => OpenURL(url).catch(onError)}/>
+                            onOpen={(url) => OpenURL(url).catch(onError)}>
+                    {gasProject ? (
+                        <GasPane project={gasProject} branch={branch} busy={busy !== null || gasFlow !== null}
+                                 onPush={startGasPush} onPull={() => setGasFlow({step: 'pull'})}
+                                 onOpen={(url) => OpenURL(url).catch(onError)}/>
+                    ) : repo && (
+                        <div className="gas-start">
+                            <button className="pr-create" disabled={busy !== null} onClick={startGas}
+                                    title="Apps Script のプロジェクトを取り込むか、新しく作る">GAS を始める</button>
+                        </div>
+                    )}
+                </RemotePane>
                 <StatusPane key={repo ?? ''} entries={status} onChange={refresh} onError={onError} onSpeak={setReaction}/>
                 <div className="commit-bar">
                     <div className="commit-buttons">
@@ -1310,7 +1589,8 @@ ${fence}
                 </div>
                 <ChatPane repo={repo ?? ''} label={branch || baseName(repo ?? '') || ''} onError={onError}/>
                 <CommitTree commits={commits} selected={pickedCommit} onSelect={setPickedCommit}
-                            canRevert={revert.target !== null} onRevert={() => setConfirmingRevert(true)}/>
+                            canRevert={revert.target !== null} onRevert={() => setConfirmingRevert(true)}
+                            webUrl={pushStatus?.webUrl ?? ''} onOpen={(url) => OpenURL(url).catch(onError)}/>
             </main>
         </div>
     )
@@ -1545,16 +1825,73 @@ function WorktreeMenu({branch, onDefault, defaultBranch, disabled, onSwitch, onC
     );
 }
 
+// 作業履歴。開いたことのあるディレクトリを最近使った順に出し、選んだところに切り替える
+function HistoryMenu({disabled, onSwitch, onError}: {
+    disabled: boolean;
+    onSwitch: (e: main.HistoryEntry) => void;
+    onError: (e: unknown) => void;
+}) {
+    const [entries, setEntries] = useState<main.HistoryEntry[] | null>(null);
+    const ref = useRef<HTMLDivElement>(null);
+
+    // メニューの外を押したら閉じる
+    useEffect(() => {
+        if (!entries) return;
+        const close = (e: MouseEvent) => {
+            if (!ref.current?.contains(e.target as Node)) setEntries(null);
+        };
+        document.addEventListener('mousedown', close);
+        return () => document.removeEventListener('mousedown', close);
+    }, [entries]);
+
+    const toggle = () => {
+        if (entries) {
+            setEntries(null);
+            return;
+        }
+        GetHistory().then(setEntries).catch(onError);
+    };
+
+    return (
+        <div className="history-menu" ref={ref}>
+            <button className="history" disabled={disabled} onClick={toggle}
+                    title="作業履歴。開いたことのあるディレクトリに切り替え">履歴</button>
+            {entries && (
+                <ul className="worktree-list">
+                    {entries.length === 0 && <li className="history-empty">まだ履歴はありません</li>}
+                    {entries.map((e) => (
+                        <li key={e.path}>
+                            <button className={e.current ? 'current' : undefined} title={e.path}
+                                    onClick={() => {
+                                        setEntries(null);
+                                        if (!e.current) onSwitch(e);
+                                    }}>
+                                <span className="worktree-branch">
+                                    {e.current ? '✓ ' : ''}{e.repo}
+                                    <span className="worktree-tag">{e.branch || 'ブランチなし'}</span>
+                                </span>
+                                <span className="worktree-path">{e.path}</span>
+                            </button>
+                        </li>
+                    ))}
+                </ul>
+            )}
+        </div>
+    );
+}
+
 const PR_STATE_LABELS: Record<string, string> = {OPEN: 'オープン', MERGED: 'マージ済み', CLOSED: 'クローズ'};
 
 // 右上: ローカルの最新が push 済みかと、今のブランチの PR
-function RemotePane({push, merge, pullRequest, busy, onCreatePullRequest, onOpen}: {
+function RemotePane({push, merge, pullRequest, busy, onCreatePullRequest, onOpen, children}: {
     push: main.PushStatus | null;
     merge: main.MergeStatus | null;
     pullRequest: PullRequestState;
     busy: boolean;
     onCreatePullRequest: () => void;
     onOpen: (url: string) => void;
+    // GitHub の下に並べる、GAS の表示
+    children?: React.ReactNode;
 }) {
     let pushLine: { text: string; ok: boolean };
     if (!push?.hasOrigin) {
@@ -1604,7 +1941,14 @@ function RemotePane({push, merge, pullRequest, busy, onCreatePullRequest, onOpen
 
     return (
         <section className="pane remote-pane">
-            <h2>リモート</h2>
+            <div className="remote-head">
+                <h2>リモート</h2>
+                {push?.webUrl && (
+                    <button className="pr-create" title={push.webUrl} onClick={() => onOpen(push.webUrl)}>
+                        {new URL(push.webUrl).hostname === 'github.com' ? 'GitHub で開く' : 'ブラウザで開く'}
+                    </button>
+                )}
+            </div>
             <p className={pushLine.ok ? 'remote-ok' : undefined}>{pushLine.ok ? '✓ ' : ''}{pushLine.text}</p>
             {push?.upstream && push.behind > 0 && (
                 <p className="remote-muted">
@@ -1635,17 +1979,75 @@ function RemotePane({push, merge, pullRequest, busy, onCreatePullRequest, onOpen
                     )}
                 </div>
             )}
+            {children}
         </section>
     );
 }
 
-function CommitTree({commits, selected, onSelect, canRevert, onRevert}: {
+// GAS の状態と操作。GAS 側は 1 つしかないので、今そこに入っているのがどのブランチの内容かを出す
+function GasPane({project, branch, busy, onPush, onPull, onOpen}: {
+    project: main.GasProject;
+    branch: string;
+    busy: boolean;
+    onPush: () => void;
+    onPull: () => void;
+    onOpen: (url: string) => void;
+}) {
+    const last = project.lastSync;
+    let line: string;
+    if (!last) {
+        line = 'まだこのアプリで GAS と同期していません';
+    } else {
+        const when = new Date(last.time * 1000).toLocaleString();
+        const what = `${last.branch || 'ブランチなし'}${last.commit ? ` の ${last.commit}` : ''}`
+            + (last.dirty ? '（コミットしていない変更あり）' : '');
+        line = last.action === 'push' ? `GAS に入っているのは ${what} の内容です（${when} に反映）`
+            : last.action === 'pull' ? `${when} に GAS の中身を ${what} に取り込みました`
+                : `${when} に GAS から取り込んで始めました`;
+    }
+    // 別のブランチで反映したままなら、今のブランチの内容は GAS にない。
+    // 最初の取り込みのあとは作業用ブランチに移るのが普通なので言わない
+    const otherBranch = !!last?.branch && !!branch && last.branch !== branch && last.action !== 'clone';
+
+    return (
+        <div className="gas">
+            <h2>Apps Script（GAS）</h2>
+            <p>{line}</p>
+            {otherBranch && (
+                <p className="remote-conflict">⚠ 今のブランチ（{branch}）ではなく、{last!.branch} で同期した内容です</p>
+            )}
+            <div className="gas-actions">
+                <button className="pr-create" disabled={busy} onClick={onPush}
+                        title={`${project.rootDir} のファイルで GAS を置き換える`}>GAS に反映</button>
+                <button className="pr-create" disabled={busy} onClick={onPull}
+                        title={`GAS の今の中身を ${project.rootDir} に取り込む`}>GAS から取り込む</button>
+                <button className="pr-create" onClick={() => onOpen(project.editorUrl)}>エディタを開く</button>
+                {project.containerUrl && (
+                    <button className="pr-create" onClick={() => onOpen(project.containerUrl)}
+                            title="この GAS が紐づくスプレッドシートなどを開く">紐づくファイルを開く</button>
+                )}
+            </div>
+        </div>
+    );
+}
+
+function CommitTree({commits, selected, onSelect, canRevert, onRevert, webUrl, onOpen}: {
     commits: main.Commit[];
     selected: string | null;
     onSelect: (hash: string) => void;
     canRevert: boolean;
     onRevert: () => void;
+    // origin のリポジトリのページ。わからなければ空
+    webUrl: string;
+    onOpen: (url: string) => void;
 }) {
+    // 差分はプッシュ済みのコミットだけ、GitHub のコミットのページで見る
+    const picked = commits.find((c) => c.hash === selected);
+    const canView = !!picked && !picked.unpushed && !!webUrl;
+    const viewTitle = !picked ? '差分を見たいコミットを選んでね'
+        : !webUrl ? 'origin がないので開けないよ'
+            : picked.unpushed ? 'まだプッシュしていないコミットだよ。プッシュすると見られるよ'
+                : 'このコミットの差分をブラウザで開く';
     // 今のブランチ（HEAD から辿れる）コミット
     const current = useMemo(() => {
         const byHash = new Map(commits.map((c) => [c.hash, c]));
@@ -1717,9 +2119,15 @@ function CommitTree({commits, selected, onSelect, canRevert, onRevert}: {
                 </div>
             </div>
             {/* スクロールしても右下に残す */}
-            <button className="revert-button" disabled={!canRevert}
-                    title={canRevert ? '選んだコミットの状態まで戻すコミットを作る' : '戻したいコミットを選んでね'}
-                    onClick={onRevert}>リバート</button>
+            <div className="tree-actions">
+                <button className="view-button" disabled={!canView} title={viewTitle}
+                        onClick={() => picked && onOpen(`${webUrl}/commit/${picked.hash}`)}>
+                    {webUrl && new URL(webUrl).hostname !== 'github.com' ? 'ブラウザで差分を見る' : 'GitHub で差分を見る'}
+                </button>
+                <button className="revert-button" disabled={!canRevert}
+                        title={canRevert ? '選んだコミットの状態まで戻すコミットを作る' : '戻したいコミットを選んでね'}
+                        onClick={onRevert}>リバート</button>
+            </div>
         </section>
     );
 }

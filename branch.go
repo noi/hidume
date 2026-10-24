@@ -269,3 +269,61 @@ func (a *App) SwitchWorktree(path string) (string, error) {
 	}
 	return a.dir(), fmt.Errorf("このリポジトリのワークツリーではありません: %s", path)
 }
+
+// managedWorktree は今開いているのが、hidume が管理するディレクトリに作ったワークツリーか
+func (a *App) managedWorktree() bool {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return false
+	}
+	root := filepath.Join(home, ".hidume", "worktrees") + string(filepath.Separator)
+	return strings.HasPrefix(filepath.Clean(a.dir()), root)
+}
+
+// RemoveWorktree は、PR をマージし終えた今のワークツリーとそのブランチを片付けて、リポジトリ本体に切り替える。
+// 本体では、デフォルトブランチを origin の最新まで早送りしておく。切り替えた先のパスを返す。
+// コミットしていない変更や、どのリモートにもまだないコミットがあれば、消してしまわないよう断る
+func (a *App) RemoveWorktree() (string, error) {
+	dir := a.dir()
+	if !a.managedWorktree() {
+		return dir, fmt.Errorf("hidume が作ったワークツリーではないので片付けません")
+	}
+	branch, err := a.runGit("symbolic-ref", "--short", "-q", "HEAD")
+	branch = strings.TrimSpace(branch)
+	if err != nil || branch == "" {
+		return dir, fmt.Errorf("ブランチにいないので片付けません")
+	}
+	if out, err := a.runGit("status", "--porcelain"); err != nil || strings.TrimSpace(out) != "" {
+		return dir, fmt.Errorf("まだコミットしていない変更があるので片付けません。コミットするか、変更を戻してください")
+	}
+	if out, err := a.runGit("rev-list", "HEAD", "--not", "--remotes"); err != nil || strings.TrimSpace(out) != "" {
+		return dir, fmt.Errorf("まだプッシュしていないコミットがあるので片付けません。プッシュしてからにしてください")
+	}
+	a.chats.mu.Lock()
+	s, ok := a.chats.sessions[dir]
+	running := ok && s.cmd != nil
+	a.chats.mu.Unlock()
+	if running {
+		return dir, fmt.Errorf("Claude がこのワークツリーで作業中なので片付けません。終わるか止めてからにしてください")
+	}
+	main, err := a.mainWorktree()
+	if err != nil {
+		return dir, err
+	}
+	// 変更がないのは確かめたので --force は付けない。git が消せないと判断したら止まる
+	if _, err := runGitIn(main, "worktree", "remove", dir); err != nil {
+		return dir, err
+	}
+	// コミットはすべてリモートにあると確かめたので、マージ済みと判断できない（スカッシュマージなど）ブランチも消す
+	if _, err := runGitIn(main, "branch", "-D", "--", branch); err != nil {
+		return a.switchRepository(main), fmt.Errorf("ワークツリーは片付けましたが、ブランチ %s を消せませんでした: %w", branch, err)
+	}
+	a.switchRepository(main)
+	// マージされた変更が入るよう、本体のデフォルトブランチを最新にしておく。オフラインなどで取れなくても片付けは済んでいる
+	if a.onDefaultBranch() {
+		if out, err := a.runGit("status", "--porcelain"); err == nil && strings.TrimSpace(out) == "" {
+			_ = a.PullUpstream()
+		}
+	}
+	return main, nil
+}

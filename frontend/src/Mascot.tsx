@@ -44,6 +44,12 @@ export function describeError(error: string): string {
     return 'エラーが出ちゃった…';
 }
 
+// 確定の Enter か。IME の変換を確定する Enter は除く。
+// WebKit（Wails の macOS の画面）は確定の Enter を isComposing: false で送ってくるので、keyCode 229 でも見分ける
+export function isEnter(e: React.KeyboardEvent) {
+    return e.key === 'Enter' && !e.nativeEvent.isComposing && e.keyCode !== 229;
+}
+
 export type SpeechAction = {
     label: string;
     onClick: () => void;
@@ -52,7 +58,7 @@ export type SpeechAction = {
     danger?: boolean;
 };
 
-// 複数行で入力し ⌘ / Ctrl + Enter で確定する。singleLine なら 1 行で Enter で確定。Esc でやめる
+// 複数行で入力する。singleLine なら 1 行。どちらも ⌘ / Ctrl + Enter で確定し、Esc でやめる
 export type SpeechInput = {
     value: string;
     placeholder: string;
@@ -114,7 +120,7 @@ export function Mascot({speech, actions, inputs, options, select, loading, sad}:
                            placeholder={input.placeholder} disabled={input.disabled} spellCheck={false}
                            onChange={(e) => input.onChange(e.target.value)}
                            onKeyDown={(e) => {
-                               if (e.key === 'Enter' && !e.nativeEvent.isComposing) input.onSubmit();
+                               if (isEnter(e) && (e.metaKey || e.ctrlKey)) input.onSubmit();
                                if (e.key === 'Escape') input.onCancel();
                            }}/>
                 ) : (
@@ -122,7 +128,7 @@ export function Mascot({speech, actions, inputs, options, select, loading, sad}:
                               value={input.value} placeholder={input.placeholder} disabled={input.disabled}
                               onChange={(e) => input.onChange(e.target.value)}
                               onKeyDown={(e) => {
-                                  if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && !e.nativeEvent.isComposing) {
+                                  if (isEnter(e) && (e.metaKey || e.ctrlKey)) {
                                       input.onSubmit();
                                   }
                                   if (e.key === 'Escape') input.onCancel();

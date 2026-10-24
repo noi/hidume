@@ -11,10 +11,17 @@ import (
 type config struct {
 	// 最後に開いたリポジトリのルート
 	Repository string `json:"repository"`
+	// 作業履歴。開いたディレクトリ（ワークツリーも 1 つずつ）を、最近使った順に並べる
+	History []string `json:"history,omitempty"`
 	// ディレクトリごとの Claude Code のセッション ID（ディレクトリとセッションは 1 対 1）
 	Sessions map[string]string `json:"sessions,omitempty"`
 	// 初回のセットアップ（ヒヅメくんの自己紹介と道具のインストール）を終えたか
 	SetupDone bool `json:"setupDone,omitempty"`
+	// Apps Script API を有効にしたと答えたか。API の状態は clasp で直接確かめられないので、答えを覚えておく
+	GasAPIEnabled bool `json:"gasApiEnabled,omitempty"`
+	// スクリプト ID ごとの、最後に GAS と同期（反映・取り込み）したときの記録。
+	// ワークツリーがいくつあっても GAS 側は 1 つなので、リポジトリではなくスクリプトごとに持つ
+	GasSync map[string]gasSyncRecord `json:"gasSync,omitempty"`
 }
 
 // 読んで書き換えて保存する間に、ほかの書き換えが割り込まないようにする

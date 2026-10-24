@@ -2,6 +2,7 @@ import {useEffect, useRef, useState} from 'react';
 import {GetChat, SendChat, StopChat} from "../wailsjs/go/main/App";
 import {main} from "../wailsjs/go/models";
 import {EventsOn} from "../wailsjs/runtime/runtime";
+import {isEnter} from "./Mascot";
 
 // Go 側が会話の 1 件や実行状態の変化を送ってくるイベント
 const CHAT_MESSAGE_EVENT = 'chat-message';
@@ -78,7 +79,7 @@ export function ChatPane({repo, label, onError}: {
                 <textarea value={text} rows={3} placeholder="Claude に頼む（⌘ + Enter で送信）" disabled={!chat}
                           onChange={(e) => setText(e.target.value)}
                           onKeyDown={(e) => {
-                              if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && !e.nativeEvent.isComposing) send();
+                              if (isEnter(e) && (e.metaKey || e.ctrlKey)) send();
                           }}/>
                 {chat?.running
                     ? <button className="chat-stop" onClick={() => StopChat().catch(onError)}>止める</button>

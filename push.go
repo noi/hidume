@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"net/url"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -28,6 +30,10 @@ type PushStatus struct {
 	Behind int `json:"behind"`
 	// デフォルトブランチ（例: main）。わからないときは空
 	DefaultBranch string `json:"defaultBranch"`
+	// origin のリポジトリのページ（例: https://github.com/owner/repo）。origin がないか、URL の形がわからなければ空
+	WebURL string `json:"webUrl"`
+	// hidume が作ったワークツリーを開いているか。PR をマージし終えたら片付けられる
+	Managed bool `json:"managed"`
 }
 
 // GetPushStatus は今のブランチを push できるかどうかの情報を返す
@@ -36,12 +42,16 @@ func (a *App) GetPushStatus() PushStatus {
 	if out, err := a.runGit("symbolic-ref", "--short", "-q", "HEAD"); err == nil {
 		s.Branch = strings.TrimSpace(out)
 	}
-	_, err := a.runGit("remote", "get-url", "origin")
+	origin, err := a.runGit("remote", "get-url", "origin")
 	s.HasOrigin = err == nil
+	if s.HasOrigin {
+		s.WebURL = webURL(strings.TrimSpace(origin))
+	}
 	if out, err := a.runGit("rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"); err == nil {
 		s.Upstream = strings.TrimSpace(out)
 	}
 	s.DefaultBranch = a.defaultBranch()
+	s.Managed = a.managedWorktree()
 	if !a.hasHead() {
 		return s
 	}
@@ -52,6 +62,29 @@ func (a *App) GetPushStatus() PushStatus {
 	s.Ahead = a.countCommits("@{upstream}..HEAD")
 	s.Behind = a.countCommits("HEAD..@{upstream}")
 	return s
+}
+
+// scpRemote は git@github.com:owner/repo.git のような、scp 風の書き方のリモート URL
+var scpRemote = regexp.MustCompile(`^(?:[A-Za-z0-9._-]+@)?([A-Za-z0-9.-]+):([^/].*)$`)
+
+// webURL はリモートの URL（https / ssh / scp 風）から、ブラウザで開けるリポジトリのページの URL を作る。
+// 作れなければ空を返す
+func webURL(remote string) string {
+	var host, repoPath string
+	if m := scpRemote.FindStringSubmatch(remote); m != nil && !strings.Contains(remote, "://") {
+		host, repoPath = m[1], m[2]
+	} else if u, err := url.Parse(remote); err == nil && (u.Scheme == "https" || u.Scheme == "http" || u.Scheme == "ssh") {
+		// ポートは ssh 用のことがあるので外す。https の URL に入っているユーザー名やトークンも外す
+		host, repoPath = u.Hostname(), u.Path
+	} else {
+		return ""
+	}
+	repoPath = strings.TrimSuffix(strings.Trim(repoPath, "/"), ".git")
+	// owner/repo の形になっていなければ、どこを開けばよいかわからない
+	if host == "" || strings.Count(repoPath, "/") < 1 || strings.ContainsAny(repoPath, "?#\\ ") {
+		return ""
+	}
+	return (&url.URL{Scheme: "https", Host: host, Path: "/" + repoPath}).String()
 }
 
 func (a *App) countCommits(rng string) int {
@@ -164,8 +197,27 @@ func (a *App) CreateGitHubRepository(owner, name, visibility string) error {
 	if err := requireGh(); err != nil {
 		return err
 	}
-	_, err := a.runNetwork("gh", "repo", "create", owner+"/"+name, "--"+visibility, "--source", ".", "--remote", "origin")
+	source, err := a.mainWorktree()
+	if err != nil {
+		return err
+	}
+	_, err = a.runNetwork("gh", "repo", "create", owner+"/"+name, "--"+visibility, "--source", source, "--remote", "origin")
 	return err
+}
+
+// mainWorktree はリポジトリ本体（最初に clone / init した場所）のパスを返す。
+// gh repo create --source は .git ディレクトリのある場所しかリポジトリと認めず、ワークツリーを渡すと断る。
+// origin はワークツリーの間で共有されるので、本体に足せば今のワークツリーでも使える
+func (a *App) mainWorktree() (string, error) {
+	common, err := a.runGit("rev-parse", "--path-format=absolute", "--git-common-dir")
+	if err != nil {
+		return "", err
+	}
+	common = filepath.Clean(strings.TrimSpace(common))
+	if filepath.Base(common) != ".git" {
+		return "", fmt.Errorf("リポジトリ本体の場所がわかりません（%s）", common)
+	}
+	return filepath.Dir(common), nil
 }
 
 func requireGh() error {

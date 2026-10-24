@@ -8,15 +8,21 @@ export function AddToGitignore(arg1:Array<string>):Promise<void>;
 
 export function ClearRepository():Promise<void>;
 
+export function CloneGasScript(arg1:string):Promise<string>;
+
 export function Commit(arg1:string):Promise<void>;
 
 export function CommitAll(arg1:string):Promise<void>;
 
 export function CompleteSetup():Promise<void>;
 
+export function ConfirmGasAPI():Promise<void>;
+
 export function ContinueMerge():Promise<void>;
 
 export function CreateBranch(arg1:string,arg2:boolean):Promise<string>;
+
+export function CreateGasScript(arg1:string,arg2:string):Promise<string>;
 
 export function CreateGitHubRepository(arg1:string,arg2:string,arg3:string):Promise<void>;
 
@@ -38,7 +44,13 @@ export function GetChat():Promise<main.ChatState>;
 
 export function GetCommits(arg1:number):Promise<Array<main.Commit>>;
 
+export function GetGasProject():Promise<main.GasProject>;
+
+export function GetGasSetup():Promise<main.SetupStatus>;
+
 export function GetGitHubOwners():Promise<main.GitHubOwners>;
+
+export function GetHistory():Promise<Array<main.HistoryEntry>>;
 
 export function GetMergeStatus():Promise<main.MergeStatus>;
 
@@ -66,9 +78,17 @@ export function OpenURL(arg1:string):Promise<void>;
 
 export function PrepareForcePush():Promise<main.ForcePushPlan>;
 
+export function PrepareGasPush():Promise<main.GasPushPlan>;
+
+export function PullGas():Promise<void>;
+
 export function PullUpstream():Promise<void>;
 
 export function Push():Promise<void>;
+
+export function PushGas(arg1:string):Promise<void>;
+
+export function RemoveWorktree():Promise<string>;
 
 export function RevertTo(arg1:string):Promise<void>;
 
@@ -83,6 +103,8 @@ export function Stage(arg1:Array<string>):Promise<void>;
 export function StageAll():Promise<void>;
 
 export function StopChat():Promise<void>;
+
+export function SwitchHistory(arg1:string):Promise<string>;
 
 export function SwitchWorktree(arg1:string):Promise<string>;
 
