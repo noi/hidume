@@ -1,0 +1,63 @@
+# semver のタグ（v1.2.3 や v1.2.3-rc.1）を push したら macOS 向けにビルドして Release に添付する
+name: release
+
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+      - "v[0-9]+.[0-9]+.[0-9]+-*"
+
+permissions:
+  contents: write
+
+jobs:
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: lts/*
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      # go.mod と同じバージョンの Wails CLI を入れる
+      - name: Install Wails CLI
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@$(go list -m -f '{{.Version}}' github.com/wailsapp/wails/v2)
+
+      # タグのバージョンを Info.plist（CFBundleShortVersionString など）に反映する
+      - name: Set version
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          jq --arg v "$VERSION" '.info.productVersion = $v' wails.json > wails.json.tmp
+          mv wails.json.tmp wails.json
+
+      - name: Build
+        run: wails build -clean -platform darwin/universal
+
+      - name: Test
+        run: go test ./...
+
+      # .app はディレクトリなので、シンボリックリンクや属性を保ったまま ditto で zip にする
+      - name: Package
+        run: |
+          ditto -c -k --keepParent build/bin/hidume.app "hidume-${GITHUB_REF_NAME}-macos-universal.zip"
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          PRERELEASE=""
+          case "$GITHUB_REF_NAME" in
+            *-*) PRERELEASE="--prerelease" ;;
+          esac
+          gh release create "$GITHUB_REF_NAME" \
+            --verify-tag \
+            --generate-notes \
+            $PRERELEASE \
+            "hidume-${GITHUB_REF_NAME}-macos-universal.zip"
