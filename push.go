@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -164,8 +165,27 @@ func (a *App) CreateGitHubRepository(owner, name, visibility string) error {
 	if err := requireGh(); err != nil {
 		return err
 	}
-	_, err := a.runNetwork("gh", "repo", "create", owner+"/"+name, "--"+visibility, "--source", ".", "--remote", "origin")
+	source, err := a.mainWorktree()
+	if err != nil {
+		return err
+	}
+	_, err = a.runNetwork("gh", "repo", "create", owner+"/"+name, "--"+visibility, "--source", source, "--remote", "origin")
 	return err
+}
+
+// mainWorktree はリポジトリ本体（最初に clone / init した場所）のパスを返す。
+// gh repo create --source は .git ディレクトリのある場所しかリポジトリと認めず、ワークツリーを渡すと断る。
+// origin はワークツリーの間で共有されるので、本体に足せば今のワークツリーでも使える
+func (a *App) mainWorktree() (string, error) {
+	common, err := a.runGit("rev-parse", "--path-format=absolute", "--git-common-dir")
+	if err != nil {
+		return "", err
+	}
+	common = filepath.Clean(strings.TrimSpace(common))
+	if filepath.Base(common) != ".git" {
+		return "", fmt.Errorf("リポジトリ本体の場所がわかりません（%s）", common)
+	}
+	return filepath.Dir(common), nil
 }
 
 func requireGh() error {
