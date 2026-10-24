@@ -1,8 +1,38 @@
 # hidume
 
-Go + [Wails v2](https://wails.io/) 製のデスクトップアプリ。フロントエンドは React + TypeScript（Vite）。
+<img src="assets/mascot/hidume_x8.png" alt="ヒヅメ" width="128" align="right">
 
-## 必要なもの
+マスコットの「ヒヅメくん」がとなりで手伝ってくれる、git クライアントのデスクトップアプリ。
+[Claude Code](https://claude.com/claude-code) と組み合わせて、コミットメッセージや PR の文面を書いたり、
+エラーの相談に乗ってもらったりできる。
+
+Go + [Wails v2](https://wails.io/) 製で、フロントエンドは React + TypeScript（Vite）。
+
+## できること
+
+- 変更のステージ・コミット・リバートと、コミットツリーの表示
+- ブランチの作成（ワークツリーで作業し、PR のマージ後に片付けられる）
+- push・pull・force push・ベースブランチのマージ
+- GitHub での PR の作成とリポジトリの作成（`gh` を使う）
+- Claude Code によるコミットメッセージと PR の文面の生成、チャットでの相談
+- 秘密情報を含みそうなファイルをコミットする前の警告
+- [clasp](https://github.com/google/clasp) を使った Google Apps Script の開発（GAS への反映・取り込み）
+- 初回起動時のセットアップ（Homebrew・git・gh・Claude Code のインストールとログイン。macOS のみ）
+
+## 使うもの
+
+アプリが呼び出す外部のコマンド。初回のセットアップで入れられる。
+
+- [git](https://git-scm.com/)
+- [GitHub CLI（gh）](https://cli.github.com/)
+- [Claude Code](https://claude.com/claude-code)
+- Google Apps Script を扱うときは Node.js と clasp
+
+設定や会話の記録は `os.UserConfigDir()` の下の `hidume/` に保存する（macOS なら `~/Library/Application Support/hidume/`）。
+
+## 開発
+
+### 必要なもの
 
 - Go 1.25 以上
 - Node.js / npm
@@ -10,7 +40,7 @@ Go + [Wails v2](https://wails.io/) 製のデスクトップアプリ。フロン
 
 環境チェックは `wails doctor`。
 
-## 開発
+### 起動
 
 ```sh
 make        # = make dev（wails dev）
@@ -18,7 +48,7 @@ make        # = make dev（wails dev）
 
 Vite のホットリロード付きで起動する。ブラウザから Go のメソッドを呼びたい場合は http://localhost:34115 を開く。
 
-## ビルド
+### ビルド
 
 ```sh
 make build  # = wails build
@@ -26,13 +56,33 @@ make build  # = wails build
 
 成果物は `build/bin/` に出力される。
 
+### テスト
+
+```sh
+go test ./...
+```
+
+`main.go` が `frontend/dist` を埋め込むので、一度もビルドしていないときは先に `make build` か
+`cd frontend && npm install && npm run build` でフロントエンドをビルドしておく。
+
 ## 構成
 
 | パス | 内容 |
 | --- | --- |
 | `main.go` | アプリのエントリポイント（ウィンドウ設定・バインド） |
-| `app.go` | フロントエンドから呼び出す Go のメソッド |
+| `app.go` | フロントエンドから呼び出す Go のメソッド（リポジトリ・ステージ・コミットなど） |
+| `branch.go` / `merge.go` / `push.go` / `force.go` | ブランチとワークツリー、マージ、push まわり |
+| `github.go` | GitHub の PR とリポジトリ（`gh` 経由） |
+| `chat.go` / `commitmsg.go` / `prmsg.go` | Claude Code とのチャット、コミットメッセージと PR の文面の生成 |
+| `clasp.go` | Google Apps Script（clasp）との連携 |
+| `setup.go` | 初回のセットアップ |
+| `config.go` / `history.go` | 設定と作業履歴の保存 |
 | `frontend/` | React + TypeScript のフロントエンド |
 | `frontend/wailsjs/` | Wails が自動生成する Go バインディング（手で編集しない） |
+| `assets/mascot/` | ヒヅメくんのドット絵と、それを生成するスクリプト |
 | `build/` | アイコンや Info.plist などのパッケージング設定 |
 | `wails.json` | Wails のプロジェクト設定 |
+
+## ライセンス
+
+[MIT License](LICENSE)
