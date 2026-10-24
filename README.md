@@ -56,6 +56,19 @@ make build  # = wails build
 
 成果物は `build/bin/` に出力される。
 
+### リリース
+
+semver のタグ（`v1.2.3`、プレリリースなら `v1.2.3-rc.1`）を push すると、GitHub Actions が
+macOS 向け（Universal）にビルドして、`hidume-<タグ>-macos-universal.zip` を添付した Release を作る。
+
+```sh
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+署名と公証はしていないので、ダウンロードしたアプリは初回に Gatekeeper に止められる。
+`xattr -dr com.apple.quarantine hidume.app` で隔離属性を外すか、Finder で右クリックして「開く」を選ぶ。
+
 ### テスト
 
 ```sh
