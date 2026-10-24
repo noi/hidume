@@ -59,7 +59,7 @@ make build  # = wails build
 ### リリース
 
 semver のタグ（`v1.2.3`、プレリリースなら `v1.2.3-rc.1`）を push すると、GitHub Actions が
-macOS 向け（Universal）にビルドして、`hidume-<タグ>-macos-universal.zip` を添付した Release を作る。
+macOS 向け（Universal）にビルドして、`hidume-<タグ>-macos-universal.dmg` を添付した Release を作る。
 
 ```sh
 git tag v0.1.0
