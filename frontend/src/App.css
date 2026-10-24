@@ -490,6 +490,19 @@
     margin: 0 0 6px;
 }
 
+/* 見出しの右端に、リポジトリのページを開くボタンを置く */
+.remote-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+
+.remote-head h2 {
+    margin: 0;
+}
+
 .remote-ok {
     color: #81c784;
 }

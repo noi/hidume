@@ -1854,7 +1854,14 @@ function RemotePane({push, merge, pullRequest, busy, onCreatePullRequest, onOpen
 
     return (
         <section className="pane remote-pane">
-            <h2>リモート</h2>
+            <div className="remote-head">
+                <h2>リモート</h2>
+                {push?.webUrl && (
+                    <button className="pr-create" title={push.webUrl} onClick={() => onOpen(push.webUrl)}>
+                        {new URL(push.webUrl).hostname === 'github.com' ? 'GitHub で開く' : 'ブラウザで開く'}
+                    </button>
+                )}
+            </div>
             <p className={pushLine.ok ? 'remote-ok' : undefined}>{pushLine.ok ? '✓ ' : ''}{pushLine.text}</p>
             {push?.upstream && push.behind > 0 && (
                 <p className="remote-muted">
