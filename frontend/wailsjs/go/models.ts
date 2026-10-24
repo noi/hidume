@@ -191,6 +191,24 @@ export namespace main {
 	        this.orgs = source["orgs"];
 	    }
 	}
+	export class HistoryEntry {
+	    path: string;
+	    repo: string;
+	    branch: string;
+	    current: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new HistoryEntry(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.path = source["path"];
+	        this.repo = source["repo"];
+	        this.branch = source["branch"];
+	        this.current = source["current"];
+	    }
+	}
 	export class MergeStatus {
 	    base: string;
 	    behind: number;

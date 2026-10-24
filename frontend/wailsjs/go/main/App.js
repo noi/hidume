@@ -98,6 +98,10 @@ export function GetGitHubOwners() {
   return window['go']['main']['App']['GetGitHubOwners']();
 }
 
+export function GetHistory() {
+  return window['go']['main']['App']['GetHistory']();
+}
+
 export function GetMergeStatus() {
   return window['go']['main']['App']['GetMergeStatus']();
 }
@@ -200,6 +204,10 @@ export function StageAll() {
 
 export function StopChat() {
   return window['go']['main']['App']['StopChat']();
+}
+
+export function SwitchHistory(arg1) {
+  return window['go']['main']['App']['SwitchHistory'](arg1);
 }
 
 export function SwitchWorktree(arg1) {

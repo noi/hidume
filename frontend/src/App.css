@@ -207,7 +207,9 @@
     flex: none;
 }
 
-.branch {
+/* 作業履歴のボタンも、ワークツリーのボタンと同じ見た目にする */
+.branch,
+.history {
     max-width: 240px;
     overflow: hidden;
     padding: 5px 12px;
@@ -226,16 +228,29 @@
     content: "⑂ ";
 }
 
-.branch::after {
+.branch::after,
+.history::after {
     content: " ▾";
 }
 
-.branch:hover:not(:disabled) {
+.branch:hover:not(:disabled),
+.history:hover:not(:disabled) {
     background-color: rgba(129, 199, 132, 0.12);
 }
 
-.branch:disabled {
+.branch:disabled,
+.history:disabled {
     cursor: default;
+}
+
+/* 緑はブランチの色なので、作業履歴は白にする */
+.history {
+    border-color: rgba(255, 255, 255, 0.6);
+    color: white;
+}
+
+.history:hover:not(:disabled) {
+    background-color: rgba(255, 255, 255, 0.12);
 }
 
 .worktree-list {
@@ -307,6 +322,32 @@
     border-top: 1px solid rgba(255, 255, 255, 0.1);
     border-radius: 0 0 4px 4px;
     color: #81c784;
+}
+
+/* 作業履歴。ヘッダーの右端に置き、一覧はワークツリーの一覧と同じ見た目で右端をそろえる */
+.history-menu {
+    position: relative;
+    flex: none;
+}
+
+/* 時計の印。絵文字だと色が付くので、SVG を型抜きにして文字と同じ色で塗る */
+.history::before {
+    content: "";
+    display: inline-block;
+    width: 1em;
+    height: 1em;
+    margin-right: 5px;
+    vertical-align: -0.15em;
+    background-color: currentColor;
+    --clock: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='8' cy='8' r='6.5'/%3E%3Cpath d='M8 4.5V8l2.5 1.5'/%3E%3C/svg%3E");
+    -webkit-mask: var(--clock) center / contain no-repeat;
+    mask: var(--clock) center / contain no-repeat;
+}
+
+.history-empty {
+    padding: 6px 10px;
+    color: rgba(255, 255, 255, 0.5);
+    font-size: 0.85rem;
 }
 
 .branch-default {

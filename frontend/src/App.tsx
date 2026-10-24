@@ -24,6 +24,7 @@ import {
     GetGasProject,
     GetGasSetup,
     GetGitHubOwners,
+    GetHistory,
     GetMergeStatus,
     GetPullRequest,
     GetPullRequestDefaults,
@@ -47,6 +48,7 @@ import {
     SelectRepository,
     SendChat,
     SetOrigin,
+    SwitchHistory,
     SwitchWorktree,
     Stage,
     StageAll,
@@ -1530,6 +1532,10 @@ ${fence}
                                       defaultBranch={pushStatus?.defaultBranch ?? ''}
                                       disabled={!repo || unborn || busy !== null}
                                       onSwitch={switchWorktree} onCreate={startBranch} onError={onError}/>
+                        <HistoryMenu disabled={busy !== null} onError={onError}
+                                     onSwitch={(e) => SwitchHistory(e.path)
+                                         .then((dir) => switchTo(dir, `${e.repo}（${e.branch || 'ブランチなし'}）に切り替えたよ`))
+                                         .catch(onError)}/>
                     </div>
                     {/* 開いている作業ディレクトリ（ワークツリー）のフルパス */}
                     {repo && (
@@ -1812,6 +1818,61 @@ function WorktreeMenu({branch, onDefault, defaultBranch, disabled, onSwitch, onC
                     <li>
                         <button className="worktree-create" onClick={() => pick(onCreate)}>＋ 新しいワークツリーを作る</button>
                     </li>
+                </ul>
+            )}
+        </div>
+    );
+}
+
+// 作業履歴。開いたことのあるディレクトリを最近使った順に出し、選んだところに切り替える
+function HistoryMenu({disabled, onSwitch, onError}: {
+    disabled: boolean;
+    onSwitch: (e: main.HistoryEntry) => void;
+    onError: (e: unknown) => void;
+}) {
+    const [entries, setEntries] = useState<main.HistoryEntry[] | null>(null);
+    const ref = useRef<HTMLDivElement>(null);
+
+    // メニューの外を押したら閉じる
+    useEffect(() => {
+        if (!entries) return;
+        const close = (e: MouseEvent) => {
+            if (!ref.current?.contains(e.target as Node)) setEntries(null);
+        };
+        document.addEventListener('mousedown', close);
+        return () => document.removeEventListener('mousedown', close);
+    }, [entries]);
+
+    const toggle = () => {
+        if (entries) {
+            setEntries(null);
+            return;
+        }
+        GetHistory().then(setEntries).catch(onError);
+    };
+
+    return (
+        <div className="history-menu" ref={ref}>
+            <button className="history" disabled={disabled} onClick={toggle}
+                    title="作業履歴。開いたことのあるディレクトリに切り替え">履歴</button>
+            {entries && (
+                <ul className="worktree-list">
+                    {entries.length === 0 && <li className="history-empty">まだ履歴はありません</li>}
+                    {entries.map((e) => (
+                        <li key={e.path}>
+                            <button className={e.current ? 'current' : undefined} title={e.path}
+                                    onClick={() => {
+                                        setEntries(null);
+                                        if (!e.current) onSwitch(e);
+                                    }}>
+                                <span className="worktree-branch">
+                                    {e.current ? '✓ ' : ''}{e.repo}
+                                    <span className="worktree-tag">{e.branch || 'ブランチなし'}</span>
+                                </span>
+                                <span className="worktree-path">{e.path}</span>
+                            </button>
+                        </li>
+                    ))}
                 </ul>
             )}
         </div>

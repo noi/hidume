@@ -76,16 +76,20 @@ func (a *App) startup(ctx context.Context) {
 func (a *App) openInitialRepository() {
 	if saved := loadConfig().Repository; saved != "" {
 		if root, err := repoRoot(saved); err == nil {
-			a.setDir(root)
+			// 作業履歴がまだない（この機能より前から使っている）ときも、前回のリポジトリが履歴に載るようにする
+			a.switchRepository(root)
 		}
 	}
 }
 
-// switchRepository は repoDir を切り替えて、次回の起動用に保存する。
+// switchRepository は repoDir を切り替えて、次回の起動用と作業履歴に保存する。
 // 保存に失敗しても切り替え自体は済んでいるので、エラーにはしない
 func (a *App) switchRepository(root string) string {
 	a.setDir(root)
-	_ = updateConfig(func(c *config) { c.Repository = root })
+	_ = updateConfig(func(c *config) {
+		c.Repository = root
+		recordHistory(c, root)
+	})
 	return root
 }
 

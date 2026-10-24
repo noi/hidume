@@ -50,6 +50,8 @@ export function GetGasSetup():Promise<main.SetupStatus>;
 
 export function GetGitHubOwners():Promise<main.GitHubOwners>;
 
+export function GetHistory():Promise<Array<main.HistoryEntry>>;
+
 export function GetMergeStatus():Promise<main.MergeStatus>;
 
 export function GetPullRequest():Promise<main.PullRequest>;
@@ -101,6 +103,8 @@ export function Stage(arg1:Array<string>):Promise<void>;
 export function StageAll():Promise<void>;
 
 export function StopChat():Promise<void>;
+
+export function SwitchHistory(arg1:string):Promise<string>;
 
 export function SwitchWorktree(arg1:string):Promise<string>;
 
