@@ -38,7 +38,7 @@ func TestRemoveWorktree(t *testing.T) {
 	remote := filepath.Join(home, "remote.git")
 	repo := filepath.Join(home, "repo")
 	for _, step := range [][]string{
-		{"init", "-q", "--bare", remote},
+		{"init", "-q", "--bare", "-b", "main", remote},
 		{"init", "-q", "-b", "main", repo},
 	} {
 		if _, err := runGitIn(home, step...); err != nil {
