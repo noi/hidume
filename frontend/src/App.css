@@ -561,6 +561,25 @@
     cursor: default;
 }
 
+/* GitHub の表示の下に、区切り線を挟んで GAS の表示を並べる */
+.gas,
+.gas-start {
+    margin-top: 16px;
+    padding-top: 12px;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.gas p {
+    margin: 0 0 6px;
+}
+
+.gas-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 10px;
+}
+
 .chat-pane {
     display: flex;
     flex-direction: column;

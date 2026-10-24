@@ -98,6 +98,16 @@ func (a *App) InstallTool(name string) error {
 		return openTerminalWith("gh", "auth", "login", "--hostname", "github.com", "--git-protocol", "https", "--web")
 	case "claude-auth":
 		return openTerminalWith("claude", "auth", "login")
+	// ここからは GAS を始めるときの準備
+	case "node":
+		return runBrew("install", "node")
+	case "clasp":
+		return installClasp()
+	case "clasp-auth":
+		return openTerminalWith("clasp", "login")
+	case "gas-api":
+		// 有効にしたかは確かめられないので、設定ページを開くだけ。済んだら ConfirmGasAPI で覚える
+		return a.OpenURL(gasSettingsURL)
 	}
 	return fmt.Errorf("知らない道具です: %q", name)
 }

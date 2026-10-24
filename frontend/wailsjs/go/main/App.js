@@ -14,6 +14,10 @@ export function ClearRepository() {
   return window['go']['main']['App']['ClearRepository']();
 }
 
+export function CloneGasScript(arg1) {
+  return window['go']['main']['App']['CloneGasScript'](arg1);
+}
+
 export function Commit(arg1) {
   return window['go']['main']['App']['Commit'](arg1);
 }
@@ -26,12 +30,20 @@ export function CompleteSetup() {
   return window['go']['main']['App']['CompleteSetup']();
 }
 
+export function ConfirmGasAPI() {
+  return window['go']['main']['App']['ConfirmGasAPI']();
+}
+
 export function ContinueMerge() {
   return window['go']['main']['App']['ContinueMerge']();
 }
 
 export function CreateBranch(arg1, arg2) {
   return window['go']['main']['App']['CreateBranch'](arg1, arg2);
+}
+
+export function CreateGasScript(arg1, arg2) {
+  return window['go']['main']['App']['CreateGasScript'](arg1, arg2);
 }
 
 export function CreateGitHubRepository(arg1, arg2, arg3) {
@@ -72,6 +84,14 @@ export function GetChat() {
 
 export function GetCommits(arg1) {
   return window['go']['main']['App']['GetCommits'](arg1);
+}
+
+export function GetGasProject() {
+  return window['go']['main']['App']['GetGasProject']();
+}
+
+export function GetGasSetup() {
+  return window['go']['main']['App']['GetGasSetup']();
 }
 
 export function GetGitHubOwners() {
@@ -130,12 +150,24 @@ export function PrepareForcePush() {
   return window['go']['main']['App']['PrepareForcePush']();
 }
 
+export function PrepareGasPush() {
+  return window['go']['main']['App']['PrepareGasPush']();
+}
+
+export function PullGas() {
+  return window['go']['main']['App']['PullGas']();
+}
+
 export function PullUpstream() {
   return window['go']['main']['App']['PullUpstream']();
 }
 
 export function Push() {
   return window['go']['main']['App']['Push']();
+}
+
+export function PushGas(arg1) {
+  return window['go']['main']['App']['PushGas'](arg1);
 }
 
 export function RevertTo(arg1) {

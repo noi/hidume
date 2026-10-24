@@ -117,7 +117,9 @@ func (a *App) SendChat(text string) error {
 	}
 
 	// auto モード: 安全な操作は自動で許可し、危なそうな操作は Claude Code が断る
-	args := []string{"--print", "--output-format", "stream-json", "--verbose", "--permission-mode", "auto"}
+	// GAS への反映（clasp push など）は外に出る操作なので、画面のボタンからだけにする
+	args := []string{"--print", "--output-format", "stream-json", "--verbose", "--permission-mode", "auto",
+		"--disallowedTools", "Bash(clasp:*),Bash(npx clasp:*)"}
 	if s.started {
 		args = append(args, "--resume", s.id)
 	} else {

@@ -92,6 +92,91 @@ export namespace main {
 	        this.ahead = source["ahead"];
 	    }
 	}
+	export class GasSync {
+	    action: string;
+	    branch: string;
+	    commit: string;
+	    dirty: boolean;
+	    time: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new GasSync(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.action = source["action"];
+	        this.branch = source["branch"];
+	        this.commit = source["commit"];
+	        this.dirty = source["dirty"];
+	        this.time = source["time"];
+	    }
+	}
+	export class GasProject {
+	    scriptId: string;
+	    rootDir: string;
+	    editorUrl: string;
+	    containerUrl: string;
+	    lastSync?: GasSync;
+	
+	    static createFrom(source: any = {}) {
+	        return new GasProject(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.scriptId = source["scriptId"];
+	        this.rootDir = source["rootDir"];
+	        this.editorUrl = source["editorUrl"];
+	        this.containerUrl = source["containerUrl"];
+	        this.lastSync = this.convertValues(source["lastSync"], GasSync);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class GasPushPlan {
+	    expected: string;
+	    overwritten: string[];
+	    lost: string[];
+	    unchanged: boolean;
+	    branch: string;
+	    commit: string;
+	    dirty: boolean;
+	    lastBranch: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new GasPushPlan(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.expected = source["expected"];
+	        this.overwritten = source["overwritten"];
+	        this.lost = source["lost"];
+	        this.unchanged = source["unchanged"];
+	        this.branch = source["branch"];
+	        this.commit = source["commit"];
+	        this.dirty = source["dirty"];
+	        this.lastBranch = source["lastBranch"];
+	    }
+	}
+	
 	export class GitHubOwners {
 	    user: string;
 	    orgs: string[];

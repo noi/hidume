@@ -10,6 +10,10 @@ const SECRET_NAMES = [
     /^service-account.*\.json$/,
     /^\.(npmrc|pypirc|netrc|htpasswd)$/,
     /^secrets?\.(json|ya?ml|toml|env|txt)$/,
+    // clasp（GAS）の認証情報と、独自の OAuth クライアント
+    /^\.clasprc\.json$/,
+    /^creds\.json$/,
+    /^client_secret.*\.json$/,
     // インフラの状態や変数（パスワードなどが入りやすい）
     /\.tfstate(\.backup)?$/,
     /\.tfvars$/,
