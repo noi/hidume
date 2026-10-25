@@ -494,7 +494,7 @@ var recommendedIgnores = []ignoreGroup{
 	{"# 秘密の情報（パスワードや鍵）", []string{".env", ".env.*", "!.env.example", "*.pem", "*.key"}},
 	{"# clasp（GAS）の認証情報", []string{".clasprc.json", "creds.json", "client_secret*.json"}},
 	{"# Node.js", []string{"node_modules/", "npm-debug.log*"}},
-	{"# Claude Code の個人の設定", []string{".claude/settings.local.json"}},
+	{"# Claude Code の個人の設定", []string{".claude/settings.local.json", "CLAUDE.local.md"}},
 	{"# エディタ", []string{".vscode/", ".idea/", "*.swp", "*~"}},
 	{"# OS が作るファイル", []string{".DS_Store", "Thumbs.db"}},
 }
