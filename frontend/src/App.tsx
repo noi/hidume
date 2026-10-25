@@ -305,9 +305,14 @@ const REPO_SETTINGS: Record<string, { label: string; about: string; done: string
     claude: {
         label: 'Claude に秘密のファイルを読ませない',
         about: 'Claude（チャットやターミナルの Claude Code）が、パスワードや鍵のファイル、Google のログイン情報を読めないようにするよ。'
-            + '履歴を上書きするフォースプッシュや、GAS のリポジトリなら GAS への直接の反映もさせないよ。'
             + '設定ファイル（.claude/settings.json）に書き足すから、コミットしてみんなで同じ設定を使ってね',
         done: 'Claude に秘密のファイルを読ませないようにしたよ！ .claude/settings.json をコミットしてね',
+    },
+    'claude-language': {
+        label: 'Claude に日本語で答えさせる',
+        about: 'Claude Code が、説明や返事をいつも日本語で書くようにするよ。'
+            + '設定ファイル（.claude/settings.json）に書き足すから、コミットしてみんなで同じ設定を使ってね',
+        done: 'Claude に日本語で答えさせるようにしたよ！ .claude/settings.json をコミットしてね',
     },
 };
 
