@@ -1731,10 +1731,13 @@ ${fence}
                                         onClick={clearRepository}>×</button>
                             )}
                         </div>
-                        <WorktreeMenu branch={branch || (pushStatus ? 'ブランチなし' : '…')} onDefault={onDefault}
-                                      defaultBranch={pushStatus?.defaultBranch ?? ''}
-                                      disabled={!repo || unborn || busy !== null}
-                                      onSwitch={switchWorktree} onCreate={startBranch} onError={onError}/>
+                        {/* リポジトリを開いていなければ、切り替えるワークツリーもない */}
+                        {repo && (
+                            <WorktreeMenu branch={branch || (pushStatus ? 'ブランチなし' : '…')} onDefault={onDefault}
+                                          defaultBranch={pushStatus?.defaultBranch ?? ''}
+                                          disabled={unborn || busy !== null}
+                                          onSwitch={switchWorktree} onCreate={startBranch} onError={onError}/>
+                        )}
                         <HistoryMenu disabled={busy !== null} onError={onError}
                                      onSwitch={(e) => SwitchHistory(e.path)
                                          .then((dir) => switchTo(dir, `${e.repo}（${e.branch || 'ブランチなし'}）に切り替えたよ`))

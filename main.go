@@ -22,6 +22,10 @@ func main() {
 		Title:  "hidume",
 		Width:  1440,
 		Height: 900,
+		// 左右のペイン（300px と 400px）と真ん中の変更・コミットの一覧、
+		// ヘッダーの吹き出し（入力欄があると 560px）とリポジトリ名が並んでも崩れない大きさ
+		MinWidth:  1200,
+		MinHeight: 720,
 		AssetServer: &assetserver.Options{
 			Assets: assets,
 		},

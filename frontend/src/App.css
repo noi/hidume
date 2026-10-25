@@ -20,6 +20,8 @@
 
 .speech-bubble {
     position: relative;
+    /* ヘッダーの右端に場所を譲り、足りなければ吹き出しのほうを狭めて折り返す */
+    min-width: 0;
     animation: pop 0.2s ease-out;
     padding: 10px 18px;
     border-radius: 12px;
@@ -67,7 +69,6 @@
 .speech-bubble.has-input {
     box-sizing: border-box;
     width: 560px;
-    max-width: calc(100vw - 360px);
 }
 
 /* セリフが 1 行でも 2 行でも高さが変わらないよう、2 行分を確保する */
@@ -114,7 +115,6 @@
 .speech-bubble.has-list {
     box-sizing: border-box;
     width: 560px;
-    max-width: calc(100vw - 360px);
 }
 
 .speech-list {
@@ -241,7 +241,9 @@
     align-items: flex-end;
     gap: 6px;
     margin-left: auto;
-    /* 吹き出しが広いときは、こちらを縮めて省略する */
+    /* 吹き出しに押されて縮まないようにする。ただし幅の半分近くまでで、それより長い名前だけを省略する */
+    flex-shrink: 0;
+    max-width: 45%;
     min-width: 0;
 }
 
