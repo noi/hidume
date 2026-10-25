@@ -17,6 +17,10 @@ import (
 
 const networkTimeout = 2 * time.Minute
 
+// 作ったばかりの GitHub のリポジトリは、受け取ったコミットが GitHub の中で行き渡るまで少しかかる。
+// その間に続けてプッシュすると "missing necessary objects" で断られるので、少しずつ間をあけてやり直す
+var pushRetryWaits = []time.Duration{2 * time.Second, 4 * time.Second, 8 * time.Second}
+
 // PushStatus は push ボタンの状態を決めるための情報
 type PushStatus struct {
 	// 今のブランチ。HEAD が切り離されているときは空
@@ -104,8 +108,7 @@ func (a *App) Push() error {
 		return fmt.Errorf("ブランチにいないのでプッシュできません")
 	}
 	if s.Upstream != "" {
-		_, err := a.runNetwork("git", "push")
-		return err
+		return a.pushRetrying("push")
 	}
 	if !s.HasOrigin {
 		return fmt.Errorf("origin が設定されていません")
@@ -115,12 +118,33 @@ func (a *App) Push() error {
 	if err := a.pushDefaultBranchIfMissing(s); err != nil {
 		return err
 	}
-	if _, err := a.runNetwork("git", "push", "--set-upstream", "origin", "HEAD:refs/heads/"+s.Branch); err != nil {
+	if err := a.pushRetrying("push", "--set-upstream", "origin", "HEAD:refs/heads/"+s.Branch); err != nil {
 		return err
 	}
 	// origin/HEAD を合わせておく。失敗してもデフォルトブランチの推測が少し弱くなるだけ
 	_, _ = a.runNetwork("git", "remote", "set-head", "origin", "--auto")
 	return nil
+}
+
+// pushRetrying は git push を実行し、GitHub がまだコミットを受け取りきっていなくて断ったときだけやり直す
+func (a *App) pushRetrying(args ...string) error {
+	return retryMissingObjects(pushRetryWaits, func() error {
+		_, err := a.runNetwork("git", args...)
+		return err
+	})
+}
+
+// retryMissingObjects は push を実行し、"missing necessary objects" で断られたら waits の間隔でやり直す
+func retryMissingObjects(waits []time.Duration, push func() error) error {
+	err := push()
+	for _, wait := range waits {
+		if err == nil || !strings.Contains(err.Error(), "missing necessary objects") {
+			return err
+		}
+		time.Sleep(wait)
+		err = push()
+	}
+	return err
 }
 
 func (a *App) pushDefaultBranchIfMissing(s PushStatus) error {
@@ -218,6 +242,15 @@ func (a *App) mainWorktree() (string, error) {
 		return "", fmt.Errorf("リポジトリ本体の場所がわかりません（%s）", common)
 	}
 	return filepath.Dir(common), nil
+}
+
+// GetRepositoryName は GitHub に作るリポジトリ名の既定値として、リポジトリ本体のディレクトリ名を返す。
+// ワークツリーで開いているときも、ワークツリーの名前ではなく本体の名前にする
+func (a *App) GetRepositoryName() string {
+	if main, err := a.mainWorktree(); err == nil {
+		return filepath.Base(main)
+	}
+	return filepath.Base(a.dir())
 }
 
 func requireGh() error {

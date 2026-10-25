@@ -34,8 +34,12 @@ func (a *App) refExists(ref string) bool {
 	return err == nil
 }
 
-// CreateInitialCommit は、まだコミットのないリポジトリに中身が空の最初のコミットを作る。
-// コミット対象にしたファイルはそのまま残し、このあと作るブランチでコミットする
+// おすすめの設定で手元に置くファイル。最初のコミットに入れる
+var recommendedFiles = []string{".gitignore", claudeSettingsPath, ciWorkflowPath, cdWorkflowPath}
+
+// CreateInitialCommit は、まだコミットのないリポジトリに最初のコミットを作る。
+// おすすめの設定で置いたファイルがあればそれだけを入れ、なければ中身は空にする。
+// ほかのファイルはそのまま残し、このあと作るブランチでコミットする
 func (a *App) CreateInitialCommit() error {
 	if a.hasHead() {
 		return fmt.Errorf("もうコミットがあります")
@@ -44,17 +48,53 @@ func (a *App) CreateInitialCommit() error {
 	if err != nil {
 		return err
 	}
-	// 標準入力なしの mktree は空のツリーを作る
-	tree, err := a.runGit("mktree")
+	tree, err := a.initialTree()
 	if err != nil {
 		return err
 	}
-	commit, err := a.runGit("commit-tree", strings.TrimSpace(tree), "-m", "Initial commit")
+	commit, err := a.runGit("commit-tree", tree, "-m", "Initial commit")
 	if err != nil {
 		return err
 	}
 	_, err = a.runGit("update-ref", "refs/heads/"+strings.TrimSpace(branch), strings.TrimSpace(commit))
 	return err
+}
+
+// initialTree は最初のコミットのツリーを作る。人がコミット対象にしたほかのファイルが混ざらないよう、別のインデックスで組み立てる。
+// 入れたファイルは本来のインデックスにも同じ中身で載せ、コミットした直後に変更として出ないようにする
+func (a *App) initialTree() (string, error) {
+	dir := a.dir()
+	// .gitignore で外されているものは入れない
+	out, err := a.runGit(append([]string{"ls-files", "-z", "--cached", "--others", "--exclude-standard", "--"}, recommendedFiles...)...)
+	if err != nil {
+		return "", err
+	}
+	// インデックスのファイルがまだないうちは、git は空のインデックスとして扱う
+	tmp, err := os.MkdirTemp("", "hidume-index-")
+	if err != nil {
+		return "", err
+	}
+	defer os.RemoveAll(tmp)
+	env := []string{"GIT_INDEX_FILE=" + filepath.Join(tmp, "index")}
+	for _, path := range strings.Split(strings.TrimRight(out, "\x00"), "\x00") {
+		// コミット対象にしたあと消したものや、シンボリックリンクは入れない
+		if info, err := os.Lstat(filepath.Join(dir, path)); path == "" || err != nil || !info.Mode().IsRegular() {
+			continue
+		}
+		blob, err := a.runGit("hash-object", "-w", "--", path)
+		if err != nil {
+			return "", err
+		}
+		entry := "100644," + strings.TrimSpace(blob) + "," + path
+		if _, err := runGitEnv(dir, env, "update-index", "--add", "--cacheinfo", entry); err != nil {
+			return "", err
+		}
+		if _, err := a.runGit("update-index", "--add", "--cacheinfo", entry); err != nil {
+			return "", err
+		}
+	}
+	tree, err := runGitEnv(dir, env, "write-tree")
+	return strings.TrimSpace(tree), err
 }
 
 var (

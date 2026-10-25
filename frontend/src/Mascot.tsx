@@ -84,7 +84,7 @@ export type SpeechOption = {
     onChange: (checked: boolean) => void;
 };
 
-// 選べる項目の一覧。済んだもの（checked）にはチェックを付けて、済んでいないものと見分けられるようにする
+// クリックして選ぶ項目の一覧。済んだもの（checked）にはチェックを付けて、済んでいないものと見分けられるようにする
 export type SpeechList = {
     items: {
         value: string;
@@ -93,9 +93,8 @@ export type SpeechList = {
         // チェックの代わりに添える一言（例: 設定できない理由の短い言い方）
         note?: string;
     }[];
-    // 今選んでいる項目
-    value: string;
-    onChange: (value: string) => void;
+    // 項目をクリックしたとき
+    onPick: (value: string) => void;
 };
 
 export function Mascot({speech, actions, inputs, options, select, list, loading, sad}: {
@@ -135,9 +134,7 @@ export function Mascot({speech, actions, inputs, options, select, list, loading,
                     <ul className="speech-list">
                         {list.items.map((item) => (
                             <li key={item.value}>
-                                <button className={item.value === list.value ? 'selected' : undefined}
-                                        aria-pressed={item.value === list.value}
-                                        onClick={() => list.onChange(item.value)}>
+                                <button onClick={() => list.onPick(item.value)}>
                                     <span className={`speech-list-mark${item.checked ? ' checked' : ''}`}
                                           aria-label={item.checked ? '済み' : 'まだ'}>{item.checked ? '✓' : ''}</span>
                                     <span className="speech-list-label">{item.label}</span>

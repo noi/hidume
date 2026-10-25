@@ -1,7 +1,7 @@
 import {useEffect, useRef, useState} from 'react';
 import {GetChat, SendChat, StopChat} from "../wailsjs/go/main/App";
 import {main} from "../wailsjs/go/models";
-import {EventsOn} from "../wailsjs/runtime/runtime";
+import {ClipboardSetText, EventsOn} from "../wailsjs/runtime/runtime";
 import {isEnter} from "./Mascot";
 
 // Go 側が会話の 1 件や実行状態の変化を送ってくるイベント
@@ -9,6 +9,9 @@ const CHAT_MESSAGE_EVENT = 'chat-message';
 const CHAT_STATE_EVENT = 'chat-state';
 
 const ROLE_LABELS: Record<string, string> = {user: 'あなた', assistant: 'Claude'};
+
+// コピーしたことを、アイコンをチェックに変えて伝える時間
+const COPIED_MS = 1500;
 
 // 右端の Claude パネル。開いているディレクトリと Claude Code のセッションは 1 対 1
 export function ChatPane({repo, label, onError}: {
@@ -19,6 +22,8 @@ export function ChatPane({repo, label, onError}: {
     const [chat, setChat] = useState<main.ChatState | null>(null);
     const [text, setText] = useState('');
     const listRef = useRef<HTMLDivElement>(null);
+    // 直前にコピーした発言の位置
+    const [copied, setCopied] = useState<number | null>(null);
 
     // ディレクトリが変わったら、そのディレクトリのセッションの会話を読み直す
     useEffect(() => {
@@ -45,6 +50,18 @@ export function ChatPane({repo, label, onError}: {
         listRef.current?.scrollTo({top: listRef.current.scrollHeight});
     }, [chat?.messages.length]);
 
+    useEffect(() => {
+        if (copied === null) return;
+        const timer = setTimeout(() => setCopied(null), COPIED_MS);
+        return () => clearTimeout(timer);
+    }, [copied]);
+
+    const copy = (i: number, text: string) => {
+        ClipboardSetText(text)
+            .then((ok) => ok ? setCopied(i) : onError('クリップボードにコピーできませんでした'))
+            .catch(onError);
+    };
+
     const send = () => {
         const message = text.trim();
         if (!message || chat?.running) return;
@@ -66,6 +83,11 @@ export function ChatPane({repo, label, onError}: {
                 {chat?.messages.map((m, i) => (
                     <div key={i} className={`chat-message chat-${m.role}`}>
                         {ROLE_LABELS[m.role] && <span className="chat-role">{ROLE_LABELS[m.role]}</span>}
+                        {ROLE_LABELS[m.role] && (
+                            <button className="chat-copy" title="コピー" aria-label="コピー" onClick={() => copy(i, m.text)}>
+                                {copied === i ? <CheckIcon/> : <CopyIcon/>}
+                            </button>
+                        )}
                         {m.text}
                     </div>
                 ))}
@@ -86,5 +108,22 @@ export function ChatPane({repo, label, onError}: {
                     : <button onClick={send} disabled={!chat || !text.trim()}>送信</button>}
             </div>
         </section>
+    );
+}
+
+function CopyIcon() {
+    return (
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
+            <rect x="5.5" y="5.5" width="8" height="8" rx="1.5"/>
+            <path d="M10.5 3.5v-1a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h1"/>
+        </svg>
+    );
+}
+
+function CheckIcon() {
+    return (
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
+            <path d="M3 8.5l3 3 7-7"/>
+        </svg>
     );
 }

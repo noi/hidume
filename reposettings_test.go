@@ -75,12 +75,18 @@ func TestWriteNewFileKeepsExisting(t *testing.T) {
 }
 
 func TestCdWorkflowBranch(t *testing.T) {
-	w := cdWorkflow("main")
+	w := cdWorkflow("main", ".")
 	if !strings.Contains(w, "    branches:\n      - \"main\"\n") {
 		t.Errorf("マージ先のブランチが入っていません:\n%s", w)
 	}
 	if !strings.Contains(w, "secrets."+claspSecretName) {
 		t.Errorf("シークレットを使っていません:\n%s", w)
+	}
+	if !strings.Contains(w, "run: clasp push --force\n") {
+		t.Errorf("直下の GAS を反映していません:\n%s", w)
+	}
+	if w := cdWorkflow("main", "gas/report"); !strings.Contains(w, "run: clasp push --force --project gas/report/.clasp.json\n") {
+		t.Errorf("gas/report の GAS を反映していません:\n%s", w)
 	}
 }
 

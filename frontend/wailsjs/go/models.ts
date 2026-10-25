@@ -113,6 +113,7 @@ export namespace main {
 	    }
 	}
 	export class GasProject {
+	    dir: string;
 	    scriptId: string;
 	    rootDir: string;
 	    editorUrl: string;
@@ -125,6 +126,7 @@ export namespace main {
 	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.dir = source["dir"];
 	        this.scriptId = source["scriptId"];
 	        this.rootDir = source["rootDir"];
 	        this.editorUrl = source["editorUrl"];
