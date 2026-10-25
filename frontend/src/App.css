@@ -111,6 +111,78 @@
     font: inherit;
 }
 
+.speech-bubble.has-list {
+    box-sizing: border-box;
+    width: 560px;
+    max-width: calc(100vw - 360px);
+}
+
+.speech-list {
+    margin: 8px 0 0;
+    padding: 0;
+    list-style: none;
+    border: 1px solid #1b2636;
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+.speech-list li + li {
+    border-top: 1px solid #d5dae1;
+}
+
+.speech-list button {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    padding: 5px 8px;
+    border: none;
+    background-color: #ffffff;
+    color: #1b2636;
+    font: inherit;
+    font-size: 0.9rem;
+    text-align: left;
+    cursor: pointer;
+}
+
+.speech-list button:hover {
+    background-color: #eef0f3;
+}
+
+.speech-list button.selected {
+    background-color: #dce8f5;
+}
+
+/* 済んだものは緑の塗りにチェック、まだのものは空の枠にする */
+.speech-list-mark {
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 16px;
+    border: 1.5px solid #8a94a3;
+    border-radius: 50%;
+    font-size: 0.7rem;
+    font-weight: bold;
+}
+
+.speech-list-mark.checked {
+    border-color: #2e7d32;
+    background-color: #2e7d32;
+    color: #ffffff;
+}
+
+.speech-list-label {
+    flex: 1;
+}
+
+.speech-list-note {
+    flex: none;
+    color: #6b7585;
+    font-size: 0.8rem;
+}
+
 .speech-option {
     display: flex;
     align-items: center;
@@ -542,6 +614,11 @@
 
 .remote-head h2 {
     margin: 0;
+}
+
+.remote-head-buttons {
+    display: flex;
+    gap: 6px;
 }
 
 .remote-ok {

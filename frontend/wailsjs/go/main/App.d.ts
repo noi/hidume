@@ -6,6 +6,8 @@ export function AbortMerge():Promise<void>;
 
 export function AddToGitignore(arg1:Array<string>):Promise<void>;
 
+export function ApplyRepoSetting(arg1:string):Promise<void>;
+
 export function ClearRepository():Promise<void>;
 
 export function CloneGasScript(arg1:string):Promise<string>;
@@ -59,6 +61,8 @@ export function GetPullRequest():Promise<main.PullRequest>;
 export function GetPullRequestDefaults():Promise<main.PullRequestDefaults>;
 
 export function GetPushStatus():Promise<main.PushStatus>;
+
+export function GetRepoSettings():Promise<main.RepoSettings>;
 
 export function GetRepository():Promise<string>;
 

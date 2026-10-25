@@ -84,13 +84,28 @@ export type SpeechOption = {
     onChange: (checked: boolean) => void;
 };
 
-export function Mascot({speech, actions, inputs, options, select, loading, sad}: {
+// 選べる項目の一覧。済んだもの（checked）にはチェックを付けて、済んでいないものと見分けられるようにする
+export type SpeechList = {
+    items: {
+        value: string;
+        label: string;
+        checked: boolean;
+        // チェックの代わりに添える一言（例: 設定できない理由の短い言い方）
+        note?: string;
+    }[];
+    // 今選んでいる項目
+    value: string;
+    onChange: (value: string) => void;
+};
+
+export function Mascot({speech, actions, inputs, options, select, list, loading, sad}: {
     speech: string;
     actions: SpeechAction[];
     // 上から順に並べ、最初の欄にフォーカスする
     inputs: SpeechInput[];
     options: SpeechOption[];
     select?: SpeechSelect;
+    list?: SpeechList;
     // 待っている間、吹き出しにくるくる回る印を出す
     loading?: boolean;
     // エラーを伝えているときは悲しい顔にする
@@ -101,8 +116,9 @@ export function Mascot({speech, actions, inputs, options, select, loading, sad}:
             <img src={faceFor(speech, !!sad)} className="mascot-image" alt="ヒヅメ"/>
             {/* セリフが変わるたびに吹き出しを作り直して、出てくるアニメーションを流す。
                 入力欄を出している間は、作り直さず大きさも固定して、ガタつかないようにする */}
-            <div key={inputs.length > 0 ? 'input' : speech}
-                 className={`speech-bubble${inputs.length > 0 ? ' has-input' : ''}`}>
+            {/* 一覧を出している間も、項目を選ぶたびに吹き出しが出直さないよう作り直さない */}
+            <div key={inputs.length > 0 ? 'input' : list ? 'list' : speech}
+                 className={`speech-bubble${inputs.length > 0 ? ' has-input' : list ? ' has-list' : ''}`}>
                 <div className="speech-text">
                     {loading && <span className="spinner" role="status" aria-label="読み込み中"/>}
                     {speech}
@@ -114,6 +130,24 @@ export function Mascot({speech, actions, inputs, options, select, loading, sad}:
                             {select.options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
                         </select>
                     </label>
+                )}
+                {list && (
+                    <ul className="speech-list">
+                        {list.items.map((item) => (
+                            <li key={item.value}>
+                                <button className={item.value === list.value ? 'selected' : undefined}
+                                        aria-pressed={item.value === list.value}
+                                        onClick={() => list.onChange(item.value)}>
+                                    <span className={`speech-list-mark${item.checked ? ' checked' : ''}`}
+                                          aria-label={item.checked ? '済み' : 'まだ'}>{item.checked ? '✓' : ''}</span>
+                                    <span className="speech-list-label">{item.label}</span>
+                                    {(item.checked || item.note) && (
+                                        <span className="speech-list-note">{item.checked ? '設定済み' : item.note}</span>
+                                    )}
+                                </button>
+                            </li>
+                        ))}
+                    </ul>
                 )}
                 {inputs.map((input, i) => input.singleLine ? (
                     <input key={i} className="speech-input" autoFocus={i === 0} value={input.value}

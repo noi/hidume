@@ -16,6 +16,7 @@ Go + [Wails v2](https://wails.io/) 製で、フロントエンドは React + Typ
 - GitHub での PR の作成とリポジトリの作成（`gh` を使う）
 - Claude Code によるコミットメッセージと PR の文面の生成、チャットでの相談
 - 秘密情報を含みそうなファイルをコミットする前の警告
+- おすすめのリポジトリ設定（PR 必須のルールセット、スカッシュマージ、.gitignore、GAS の CI・CD など）を 1 つずつ有効化
 - [clasp](https://github.com/google/clasp) を使った Google Apps Script の開発（GAS への反映・取り込み）
 - 初回起動時のセットアップ（Homebrew・git・gh・Claude Code のインストールとログイン。macOS のみ）
 

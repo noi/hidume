@@ -230,6 +230,11 @@ func requireGh() error {
 // runNetwork はネットワークを使うコマンドをリポジトリで実行する。
 // GUI から呼ぶので、認証の入力待ちで止まらないようにし、時間も区切る
 func (a *App) runNetwork(name string, args ...string) (string, error) {
+	return a.runNetworkInput("", name, args...)
+}
+
+// runNetworkInput は runNetwork と同じく実行し、input を標準入力に渡す。秘密の値を引数に載せずに渡すときに使う
+func (a *App) runNetworkInput(input string, name string, args ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), networkTimeout)
 	defer cancel()
 
@@ -241,6 +246,7 @@ func (a *App) runNetwork(name string, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "GH_PROMPT_DISABLED=1", "GIT_OPTIONAL_LOCKS=0")
+	cmd.Stdin = strings.NewReader(input)
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {

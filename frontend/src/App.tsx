@@ -3,6 +3,7 @@ import './App.css';
 import {
     AbortMerge,
     AddToGitignore,
+    ApplyRepoSetting,
     Commit,
     ContinueMerge,
     ClearRepository,
@@ -29,6 +30,7 @@ import {
     GetPullRequest,
     GetPullRequestDefaults,
     GetPushStatus,
+    GetRepoSettings,
     GetRepository,
     GetSetup,
     GetStatus,
@@ -59,7 +61,7 @@ import {ClipboardSetText, EventsOn} from "../wailsjs/runtime/runtime";
 import {layoutGraph} from "./commitGraph";
 import {ChatPane} from "./ChatPane";
 import {isSecretFile} from "./secrets";
-import {describeError, describeStatus, Mascot, SpeechAction, SpeechInput, SpeechOption, SpeechSelect} from "./Mascot";
+import {describeError, describeStatus, Mascot, SpeechAction, SpeechInput, SpeechList, SpeechOption, SpeechSelect} from "./Mascot";
 
 const COMMIT_LIMIT = 300;
 // PR の状態は GitHub に聞くので、ファイルの変化とは別にこの間隔で確認する
@@ -260,6 +262,70 @@ type GasFlow =
     // 反映の確認。plan は GAS 側を確かめている間は null
     | { step: 'push'; plan: main.GasPushPlan | null }
     | { step: 'pull' };
+// おすすめのリポジトリ設定。キーは Go 側の設定の ID。並びは Go 側が返す順にする
+const REPO_SETTINGS: Record<string, { label: string; about: string; done: string }> = {
+    'require-pr': {
+        label: 'PR を通してだけ更新する',
+        about: 'デフォルトブランチ（みんなが使う完成版）に直接プッシュできないようにして、必ず PR を通して更新するようにするよ。'
+            + '変更を確かめてから入れる流れになるから、うっかり壊れたものが入らなくて安全だよ',
+        done: 'デフォルトブランチを PR を通してだけ更新できるようにしたよ！',
+    },
+    'squash-merge': {
+        label: 'PR を 1 つのコミットにまとめてマージする',
+        about: 'PR をマージするとき、PR の中のコミットを 1 つにまとめるようにするよ。'
+            + 'デフォルトブランチの履歴が「PR 1 つ = コミット 1 つ」になって、何をいつ変えたか見やすくなるよ。'
+            + 'まとめたコミットの名前は PR のタイトルに、説明は PR の中のコミットの一覧になるよ',
+        done: 'PR を 1 つのコミットにまとめてマージするようにしたよ！',
+    },
+    'delete-branch': {
+        label: 'マージしたブランチを GitHub から消す',
+        about: 'PR をマージしたら、GitHub に残っている作業用のブランチを自動で消すよ。使い終わったブランチが溜まらなくて、すっきりするよ',
+        done: 'マージしたブランチを GitHub から消すようにしたよ！',
+    },
+    gitignore: {
+        label: '.gitignore を整える',
+        about: 'パスワードや鍵のファイル、エディタや Mac が勝手に作るファイルみたいな、コミットしなくていいものを .gitignore に足すよ。'
+            + '秘密の情報をうっかり GitHub に上げるのを防げるよ。足したら、その変更をコミットしてね',
+        done: '.gitignore に足したよ！ 変更をコミットしてね',
+    },
+    ci: {
+        label: 'PR ごとにコードを自動でチェックする（CI）',
+        about: 'PR を出すたびに、GAS のコードに書き間違い（文法の間違い）がないかを GitHub が自動で確かめるよ。'
+            + 'チェックに通らない PR はマージできなくなるから、動かないコードが入りにくくなるよ。'
+            + 'チェックの設定ファイル（.github/workflows/ci.yml）を置くから、コミットして PR でデフォルトブランチに入れてね',
+        done: 'CI を置いて、通らないとマージできないようにしたよ！ ci.yml をコミットして PR を出してね',
+    },
+    cd: {
+        label: 'マージしたら GAS に自動で反映する（CD）',
+        about: 'PR をデフォルトブランチにマージすると、その内容で GitHub が自動で GAS を置き換えるよ。「GAS に反映」の押し忘れがなくなるよ。'
+            + 'ブラウザのエディタで直接変えたところは上書きされちゃうから、これからの変更は全部このリポジトリでしてね。'
+            + '設定ファイル（.github/workflows/deploy.yml）を置くから、コミットして PR でデフォルトブランチに入れてね',
+        done: 'マージしたら GAS に反映するようにしたよ！ deploy.yml をコミットして PR を出してね',
+    },
+    claude: {
+        label: 'Claude に秘密のファイルを読ませない',
+        about: 'Claude（チャットやターミナルの Claude Code）が、パスワードや鍵のファイル、Google のログイン情報を読めないようにするよ。'
+            + '履歴を上書きするフォースプッシュや、GAS のリポジトリなら GAS への直接の反映もさせないよ。'
+            + '設定ファイル（.claude/settings.json）に書き足すから、コミットしてみんなで同じ設定を使ってね',
+        done: 'Claude に秘密のファイルを読ませないようにしたよ！ .claude/settings.json をコミットしてね',
+    },
+};
+
+// おすすめのリポジトリ設定を選んで、1 つずつ設定する流れ
+type SettingsFlow =
+    // git init や GitHub にリポジトリを作った直後に、設定するか聞く。message はその前に言うこと
+    | { step: 'offer'; message: string }
+    // settings は読み込んでいる間は null。done は直前に設定したときに言うこと
+    | { step: 'menu'; settings: main.RepoSettings | null; picked: string; done: string }
+    // CD で Google のログイン情報を GitHub に預けてよいか確かめる
+    | { step: 'confirmCd'; settings: main.RepoSettings };
+
+// まだ設定していなくて、今設定できるものを先に選んでおく
+const pickSetting = (settings: main.RepoSettings, current = '') => {
+    const ready = settings.settings.find((s) => !s.enabled && !s.blocked);
+    return settings.settings.some((s) => s.id === current) ? current : ready?.id ?? settings.settings[0]?.id ?? '';
+};
+
 // ターミナルでやっていることが終わったかを確かめる間隔
 const SETUP_POLL_MS = 3000;
 
@@ -318,6 +384,7 @@ function App() {
     // 開いているリポジトリに紐づく GAS。.clasp.json がなければ null
     const [gasProject, setGasProject] = useState<main.GasProject | null>(null);
     const [gasFlow, setGasFlow] = useState<GasFlow | null>(null);
+    const [settingsFlow, setSettingsFlow] = useState<SettingsFlow | null>(null);
 
     useEffect(() => {
         if (!reaction) return;
@@ -386,6 +453,7 @@ function App() {
         setBranchDraft(null);
         setSecretCheck(null);
         setGasFlow(null);
+        setSettingsFlow(null);
         setReaction(message);
         refresh();
     };
@@ -420,7 +488,10 @@ function App() {
     const initRepository = (dir: string) => {
         setInitDir(null);
         InitRepository(dir)
-            .then((root) => switchTo(root, `${baseName(root)} で git init したよ！`))
+            .then((root) => {
+                switchTo(root, `${baseName(root)} で git init したよ！`);
+                offerSettings(`${baseName(root)} で git init したよ！`);
+            })
             .catch(onError);
     };
 
@@ -489,9 +560,15 @@ function App() {
         setGasFlow(null);
         setBusy(flow.step === 'clone' ? '置くフォルダーを選んでね。選んだら GAS を取り込むよ…' : '置くフォルダーを選んでね。選んだら GAS を作るよ…');
         (flow.step === 'clone' ? CloneGasScript(flow.url.trim()) : CreateGasScript(flow.title.trim(), flow.kind))
-            .then((dir) => dir
-                ? switchTo(dir, flow.step === 'clone' ? `${baseName(dir)} に GAS を取り込んだよ！` : `${baseName(dir)} に GAS を作ったよ！`)
-                : setGasFlow(flow))
+            .then((dir) => {
+                if (!dir) {
+                    setGasFlow(flow);
+                    return;
+                }
+                const message = flow.step === 'clone' ? `${baseName(dir)} に GAS を取り込んだよ！` : `${baseName(dir)} に GAS を作ったよ！`;
+                switchTo(dir, message);
+                offerSettings(message);
+            })
             .catch(onError)
             .finally(() => setBusy(null));
     };
@@ -524,6 +601,36 @@ function App() {
         'GAS に反映したよ！ シートやエディタで試してみてね');
     const runGasPull = () => runGas('GAS の中身を取り込んでるよ…', PullGas,
         'GAS の中身を取り込んだよ！ 変わったところを確かめてからコミットしてね');
+
+    const offerSettings = (message: string) => setSettingsFlow({step: 'offer', message});
+
+    // GitHub の設定も読むので時間がかかる。読んでいる間も吹き出しは出しておく
+    const openSettings = (done = '', current = '') => {
+        setError('');
+        setSettingsFlow({step: 'menu', settings: null, picked: current, done});
+        GetRepoSettings()
+            .then((settings) => setSettingsFlow((f) => f?.step === 'menu'
+                ? {...f, settings, picked: pickSetting(settings, current)}
+                : f))
+            .catch((e) => {
+                setSettingsFlow(null);
+                onError(e);
+            });
+    };
+
+    // 1 つ設定したら、ほかも続けて設定できるよう一覧に戻る
+    const applySetting = (id: string) => {
+        const item = REPO_SETTINGS[id];
+        setSettingsFlow(null);
+        setBusy(`「${item.label}」を設定してるよ…`);
+        ApplyRepoSetting(id)
+            .then(() => openSettings(item.done, id))
+            .catch(onError)
+            .finally(() => {
+                setBusy(null);
+                refresh();
+            });
+    };
 
     const stageAll = () => {
         const count = status.filter((e) => e.workTree !== ' ').length;
@@ -693,13 +800,14 @@ function App() {
     };
 
     // 時間のかかる操作を順に走らせ、その間はヒヅメくんに待っていることを言わせる
-    const runBusy = (steps: [string, () => Promise<void>][], done: string) => {
+    // offer なら、済んだあとにおすすめのリポジトリ設定をするか聞く
+    const runBusy = (steps: [string, () => Promise<void>][], done: string, offer = false) => {
         setPushFlow(null);
         steps.reduce((p, [message, step]) => p.then(() => {
             setBusy(message);
             return step();
         }), Promise.resolve())
-            .then(() => setReaction(done))
+            .then(() => offer ? offerSettings(done) : setReaction(done))
             // リモートに手元にないコミットがあって断られたら、フォースプッシュするか聞く
             .catch((e) => isPushRejected(e) ? startForcePush(true) : onError(e))
             .finally(() => {
@@ -1010,6 +1118,7 @@ ${fence}
         },
     };
     let select: SpeechSelect | undefined;
+    let list: SpeechList | undefined;
     if (setup?.step === 'hello') {
         speech = 'はじめまして！ ぼくはヒヅメ。きみの git の作業をとなりで手伝うよ。まずは、ぼくが働くのに必要な道具をそろえよう！';
         actions = [{label: 'よろしくね！', onClick: () => setSetup({...setup, step: 'tools'})}];
@@ -1160,6 +1269,69 @@ ${fence}
             {label: '取り込む', onClick: runGasPull},
             {label: 'やめる', onClick: () => setGasFlow(null)},
         ];
+    } else if (settingsFlow?.step === 'offer') {
+        speech = `${settingsFlow.message} 安全に使うための、おすすめのリポジトリ設定も見てみる？ あとからでも「おすすめ設定」で設定できるよ`;
+        actions = [
+            {label: '見てみる', onClick: () => openSettings()},
+            {label: 'あとで', onClick: () => setSettingsFlow(null)},
+        ];
+    } else if (settingsFlow?.step === 'menu' && !settingsFlow.settings) {
+        speech = 'リポジトリの今の設定を確かめてるよ…';
+        actions = [{label: 'やめる', onClick: () => setSettingsFlow(null)}];
+    } else if (settingsFlow?.step === 'menu' && settingsFlow.settings) {
+        const flow = settingsFlow;
+        const settings = flow.settings!;
+        const picked = settings.settings.find((s) => s.id === flow.picked) ?? settings.settings[0];
+        const item = REPO_SETTINGS[picked.id];
+        const close = {label: '閉じる', onClick: () => setSettingsFlow(null)};
+        const done = flow.done ? `${flow.done} ` : '';
+        list = {
+            value: picked.id,
+            items: settings.settings.map((s) => ({
+                value: s.id,
+                label: REPO_SETTINGS[s.id].label,
+                checked: s.enabled,
+                note: s.blocked ? '今は設定できない' : undefined,
+            })),
+            onChange: (id) => setSettingsFlow({...flow, picked: id, done: ''}),
+        };
+        // CI や CD のファイルをプッシュするには、GitHub のログインに workflow の権限が要る
+        const needsScope = settings.needsWorkflowScope && !picked.enabled && (picked.id === 'ci' || picked.id === 'cd');
+        if (picked.enabled) {
+            speech = `${done}「${item.label}」はもう設定してあるよ。${item.about}`;
+            actions = [close];
+        } else if (picked.blocked) {
+            speech = `${done}${item.about}。でも今は設定できないよ: ${picked.blocked}`;
+            actions = [close];
+        } else if (needsScope) {
+            speech = `${done}${item.about}。その前に、GitHub のログインに設定ファイルをプッシュする権限を足す必要があるよ。`
+                + 'ターミナルが開くから、そこで許可してね。終わったら「確かめ直す」を押してね';
+            actions = [
+                {label: '権限を足す', onClick: () => InstallTool('gh-workflow').catch(onError)},
+                {label: '確かめ直す', onClick: () => openSettings('', picked.id)},
+                close,
+            ];
+        } else {
+            speech = `${done}${item.about}。設定する？`;
+            actions = [
+                {
+                    label: '設定する',
+                    onClick: () => picked.id === 'cd'
+                        ? setSettingsFlow({step: 'confirmCd', settings})
+                        : applySetting(picked.id),
+                },
+                close,
+            ];
+        }
+    } else if (settingsFlow?.step === 'confirmCd') {
+        const back = () => setSettingsFlow({step: 'menu', settings: settingsFlow.settings, picked: 'cd', done: ''});
+        speech = 'GitHub から GAS に反映できるように、この Mac の clasp の Google ログイン情報を GitHub のシークレット（秘密の保管場所）に預けるよ。'
+            + 'このログイン情報があれば、きみの Google アカウントで GAS やドライブのファイルを扱えちゃう。'
+            + 'このリポジトリに書き込める人なら取り出せてしまうから、信頼できる人だけのリポジトリで使ってね。預けて設定する？';
+        actions = [
+            {label: '戻る', onClick: back},
+            {label: '預けて設定する', danger: true, onClick: () => applySetting('cd')},
+        ];
     } else if (mergeStatus?.merging && conflicts.length > 0 && delegatedMerge) {
         speech = `コンフリクトの解消を Claude にお願いしたよ。右のパネルで様子を見てね（残り ${conflicts.length} 件）`;
         actions = [{label: 'マージをやめる', onClick: abortMerge}];
@@ -1268,7 +1440,7 @@ ${fence}
                     ['GitHub にリポジトリを作ってるよ…',
                         () => CreateGitHubRepository(flow.owner, flow.value.trim(), 'public')],
                     pushing,
-                ], `GitHub に ${fullName} を作ってプッシュしたよ！`),
+                ], `GitHub に ${fullName} を作ってプッシュしたよ！`, true),
             },
         ];
     } else if (pushFlow?.step === 'create' && pushFlow.owners) {
@@ -1279,7 +1451,7 @@ ${fence}
         const create = (visibility: 'internal' | 'private') => name && runBusy([
             ['GitHub にリポジトリを作ってるよ…', () => CreateGitHubRepository(flow.owner, name, visibility)],
             pushing,
-        ], `GitHub に ${fullName} を作ってプッシュしたよ！`);
+        ], `GitHub に ${fullName} を作ってプッシュしたよ！`, true);
         speech = 'GitHub のどこに、なんて名前で作る？';
         select = {
             label: '作成先',
@@ -1508,11 +1680,12 @@ ${fence}
     return (
         <div id="App">
             <header className="mascot">
-                <Mascot speech={speech} actions={actions} inputs={inputs} options={options} select={select} sad={sad}
+                <Mascot speech={speech} actions={actions} inputs={inputs} options={options} select={select} list={list} sad={sad}
                         loading={busy !== null || (draft !== null && generating)
                             || (pushFlow?.step === 'create' && !pushFlow.owners)
                             || (pushFlow?.step === 'force' && !pushFlow.plan)
                             || (gasFlow?.step === 'push' && !gasFlow.plan)
+                            || (settingsFlow?.step === 'menu' && !settingsFlow.settings)
                             || (prDraft !== null && (!prDraft.bases || generating))
                             || (branchDraft !== null && !branchDraft.prefix)}/>
                 {/* 右端は 2 段にして、作業ディレクトリのパスもマスコットの高さの中に収める */}
@@ -1557,6 +1730,7 @@ ${fence}
             <main className="panes">
                 <RemotePane push={pushStatus} merge={mergeStatus} pullRequest={pullRequest} busy={busy !== null}
                             onCreatePullRequest={startPullRequest}
+                            onSettings={repo ? () => openSettings() : undefined}
                             onOpen={(url) => OpenURL(url).catch(onError)}>
                     {gasProject ? (
                         <GasPane project={gasProject} branch={branch} busy={busy !== null || gasFlow !== null}
@@ -1883,12 +2057,14 @@ function HistoryMenu({disabled, onSwitch, onError}: {
 const PR_STATE_LABELS: Record<string, string> = {OPEN: 'オープン', MERGED: 'マージ済み', CLOSED: 'クローズ'};
 
 // 右上: ローカルの最新が push 済みかと、今のブランチの PR
-function RemotePane({push, merge, pullRequest, busy, onCreatePullRequest, onOpen, children}: {
+function RemotePane({push, merge, pullRequest, busy, onCreatePullRequest, onSettings, onOpen, children}: {
     push: main.PushStatus | null;
     merge: main.MergeStatus | null;
     pullRequest: PullRequestState;
     busy: boolean;
     onCreatePullRequest: () => void;
+    // おすすめのリポジトリ設定を開く。リポジトリを開いていなければ出さない
+    onSettings?: () => void;
     onOpen: (url: string) => void;
     // GitHub の下に並べる、GAS の表示
     children?: React.ReactNode;
@@ -1943,11 +2119,17 @@ function RemotePane({push, merge, pullRequest, busy, onCreatePullRequest, onOpen
         <section className="pane remote-pane">
             <div className="remote-head">
                 <h2>リモート</h2>
-                {push?.webUrl && (
-                    <button className="pr-create" title={push.webUrl} onClick={() => onOpen(push.webUrl)}>
-                        {new URL(push.webUrl).hostname === 'github.com' ? 'GitHub で開く' : 'ブラウザで開く'}
-                    </button>
-                )}
+                <div className="remote-head-buttons">
+                    {onSettings && (
+                        <button className="pr-create" disabled={busy} onClick={onSettings}
+                                title="ブランチの保護や .gitignore など、おすすめのリポジトリ設定を 1 つずつ設定する">おすすめ設定</button>
+                    )}
+                    {push?.webUrl && (
+                        <button className="pr-create" title={push.webUrl} onClick={() => onOpen(push.webUrl)}>
+                            {new URL(push.webUrl).hostname === 'github.com' ? 'GitHub で開く' : 'ブラウザで開く'}
+                        </button>
+                    )}
+                </div>
             </div>
             <p className={pushLine.ok ? 'remote-ok' : undefined}>{pushLine.ok ? '✓ ' : ''}{pushLine.text}</p>
             {push?.upstream && push.behind > 0 && (
