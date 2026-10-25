@@ -96,6 +96,9 @@ func (a *App) InstallTool(name string) error {
 		return runBrew("install", "--cask", "claude-code")
 	case "gh-auth":
 		return openTerminalWith("gh", "auth", "login", "--hostname", "github.com", "--git-protocol", "https", "--web")
+	case "gh-workflow":
+		// CI や CD のファイル（.github/workflows）をプッシュするには、gh のログインに workflow の権限が要る
+		return openTerminalWith("gh", "auth", "refresh", "--hostname", "github.com", "--scopes", "workflow")
 	case "claude-auth":
 		return openTerminalWith("claude", "auth", "login")
 	// ここからは GAS を始めるときの準備

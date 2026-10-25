@@ -10,6 +10,10 @@ export function AddToGitignore(arg1) {
   return window['go']['main']['App']['AddToGitignore'](arg1);
 }
 
+export function ApplyRepoSetting(arg1) {
+  return window['go']['main']['App']['ApplyRepoSetting'](arg1);
+}
+
 export function ClearRepository() {
   return window['go']['main']['App']['ClearRepository']();
 }
@@ -116,6 +120,10 @@ export function GetPullRequestDefaults() {
 
 export function GetPushStatus() {
   return window['go']['main']['App']['GetPushStatus']();
+}
+
+export function GetRepoSettings() {
+  return window['go']['main']['App']['GetRepoSettings']();
 }
 
 export function GetRepository() {
