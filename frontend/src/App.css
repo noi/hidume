@@ -745,6 +745,7 @@
 }
 
 .chat-message {
+    position: relative;
     padding: 8px 10px;
     border-radius: 8px;
     font-size: 0.85rem;
@@ -758,6 +759,36 @@
     margin-bottom: 2px;
     color: rgba(255, 255, 255, 0.5);
     font-size: 0.75rem;
+}
+
+/* 発言の右上に置くコピーのボタン。普段は控えめにし、発言にマウスを載せたら目立たせる */
+.chat-copy {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    display: flex;
+    padding: 3px;
+    border: none;
+    border-radius: 4px;
+    background: none;
+    color: rgba(255, 255, 255, 0.35);
+    cursor: pointer;
+}
+
+.chat-message:hover .chat-copy,
+.chat-copy:focus-visible {
+    color: rgba(255, 255, 255, 0.8);
+}
+
+.chat-copy:hover {
+    background-color: rgba(255, 255, 255, 0.12);
+    color: #ffffff;
+}
+
+/* 名前の行の右にコピーのボタンが来るので、そこに文字がかからないようにする */
+.chat-user .chat-role,
+.chat-assistant .chat-role {
+    padding-right: 24px;
 }
 
 .chat-user {
