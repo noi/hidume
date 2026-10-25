@@ -19,8 +19,6 @@ import (
 	"strings"
 	"time"
 	"unicode"
-
-	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 const (
@@ -35,6 +33,8 @@ const (
 	gasSettingsURL = "https://script.google.com/home/usersettings"
 	// 取り込み・新規作成したときに GAS のファイルを置くディレクトリ。README や CLAUDE.md を GAS に送らないよう分ける
 	gasRootDir = "src"
+	// 今のリポジトリに GAS を足すときは、この下の gas/{project}/ に置く。1 つのリポジトリに複数の GAS を置ける
+	gasProjectsDir = "gas"
 )
 
 // GAS の新規作成で選べる種類。clasp create-script の --type に渡す値
@@ -47,6 +47,8 @@ var (
 	// スプレッドシートやドキュメントの URL。スクリプトの URL と間違えて貼られやすい
 	docsURL   = regexp.MustCompile(`^https://(?:docs|drive)\.google\.com/`)
 	sha256Hex = regexp.MustCompile(`^[0-9a-f]{64}$`)
+	// gas/{project}/ の名前。CI / CD のパスにも書くので、記号を含まないものにする
+	gasProjectName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
 )
 
 // GasSync は最後に GAS と同期（反映・取り込み）したときのこと
@@ -72,6 +74,8 @@ type gasSyncRecord struct {
 
 // GasProject はリポジトリに紐づく Apps Script のプロジェクト
 type GasProject struct {
+	// .clasp.json を置くディレクトリ（リポジトリからの相対パス）。リポジトリ直下なら "."、ほかは gas/{project}
+	Dir      string `json:"dir"`
 	ScriptID string `json:"scriptId"`
 	// GAS のファイルを置くディレクトリ（リポジトリからの相対パス）
 	RootDir   string `json:"rootDir"`
@@ -102,8 +106,10 @@ type GasPushPlan struct {
 
 // claspProject は .clasp.json のうち hidume が使う項目
 type claspProject struct {
+	// .clasp.json を置くディレクトリ（リポジトリからの / 区切りの相対パス）。リポジトリ直下なら "."
+	Dir      string
 	ScriptID string
-	// GAS のファイルを置くディレクトリ（/ 区切りの相対パス）。リポジトリ直下なら "."
+	// GAS のファイルを置くディレクトリ（リポジトリからの / 区切りの相対パス）。リポジトリ直下なら "."
 	RootDir          string
 	ParentID         string
 	ScriptExtensions []string
@@ -257,9 +263,35 @@ func claspError(command, output string) error {
 	return fmt.Errorf("%s\n\nclasp %s: %s", hint, command, output)
 }
 
-// readClaspProject はリポジトリ直下の .clasp.json を読む。なければ nil を返す
-func readClaspProject(repo string) (*claspProject, error) {
-	data, err := os.ReadFile(filepath.Join(repo, ".clasp.json"))
+// gasProjects はリポジトリの GAS のプロジェクトを返す。直下の .clasp.json と、gas/{project}/.clasp.json を見る
+func gasProjects(repo string) ([]*claspProject, error) {
+	dirs := []string{"."}
+	entries, err := os.ReadDir(filepath.Join(repo, gasProjectsDir))
+	if err != nil && !os.IsNotExist(err) {
+		return nil, err
+	}
+	for _, e := range entries {
+		if e.IsDir() {
+			dirs = append(dirs, gasProjectsDir+"/"+e.Name())
+		}
+	}
+	projects := []*claspProject{}
+	for _, dir := range dirs {
+		p, err := readClaspProject(repo, dir)
+		if err != nil {
+			return nil, err
+		}
+		if p != nil {
+			projects = append(projects, p)
+		}
+	}
+	return projects, nil
+}
+
+// readClaspProject はリポジトリの dir（/ 区切りの相対パス）にある .clasp.json を読む。なければ nil を返す
+func readClaspProject(repo, dir string) (*claspProject, error) {
+	name := path.Join(dir, ".clasp.json")
+	data, err := os.ReadFile(filepath.Join(repo, filepath.FromSlash(name)))
 	if os.IsNotExist(err) {
 		return nil, nil
 	}
@@ -275,22 +307,24 @@ func readClaspProject(repo string) (*claspProject, error) {
 		HTMLExtensions   json.RawMessage `json:"htmlExtensions"`
 	}
 	if err := json.Unmarshal(data, &raw); err != nil {
-		return nil, fmt.Errorf(".clasp.json を読めませんでした: %w", err)
+		return nil, fmt.Errorf("%s を読めませんでした: %w", name, err)
 	}
 	if !scriptID.MatchString(raw.ScriptID) {
-		return nil, fmt.Errorf(".clasp.json のスクリプト ID が正しくありません: %q", raw.ScriptID)
+		return nil, fmt.Errorf("%s のスクリプト ID が正しくありません: %q", name, raw.ScriptID)
 	}
 	root := raw.RootDir
 	if root == "" {
 		root = raw.SrcDir
 	}
 	root = path.Clean(filepath.ToSlash(root))
+	// clasp は rootDir を .clasp.json の場所から数える
 	if root != "." && !filepath.IsLocal(filepath.FromSlash(root)) {
-		return nil, fmt.Errorf(".clasp.json の rootDir がリポジトリの外を指しています: %q", raw.RootDir)
+		return nil, fmt.Errorf("%s の rootDir が %s の外を指しています: %q", name, dir, raw.RootDir)
 	}
 	p := &claspProject{
+		Dir:              dir,
 		ScriptID:         raw.ScriptID,
-		RootDir:          root,
+		RootDir:          path.Join(dir, root),
 		ScriptExtensions: extensions(stringList(raw.ScriptExtensions), ".js", ".gs"),
 		HTMLExtensions:   extensions(stringList(raw.HTMLExtensions), ".html"),
 	}
@@ -432,34 +466,53 @@ func writeClaspConfig(file string, settings map[string]any) error {
 	return os.WriteFile(file, append(data, '\n'), 0o644)
 }
 
-// gasProject は今のリポジトリの .clasp.json を読む。なければエラーにする。
+// gasProject は今のリポジトリの、dir（GasProject の Dir）にある GAS のプロジェクトを読む。なければエラーにする。
 // 返すリポジトリのパスは、clasp に渡せるようシンボリックリンクをたどった先にする
-func (a *App) gasProject() (string, *claspProject, error) {
+func (a *App) gasProject(dir string) (string, *claspProject, error) {
 	if a.dir() == "" {
 		return "", nil, errNoRepository
 	}
-	dir, err := filepath.EvalSymlinks(a.dir())
+	repo, err := filepath.EvalSymlinks(a.dir())
 	if err != nil {
 		return "", nil, err
 	}
-	p, err := readClaspProject(dir)
-	if err == nil && p == nil {
-		err = fmt.Errorf("このリポジトリには .clasp.json がありません")
+	// 決まった場所のほかは読まない
+	if dir != "." && !(path.Dir(dir) == gasProjectsDir && gasProjectName.MatchString(path.Base(dir))) {
+		return "", nil, fmt.Errorf("GAS のプロジェクトの場所が正しくありません: %q", dir)
 	}
-	return dir, p, err
+	p, err := readClaspProject(repo, dir)
+	if err == nil && p == nil {
+		err = fmt.Errorf("%s に .clasp.json がありません", dir)
+	}
+	return repo, p, err
 }
 
-// GetGasProject は今のリポジトリに紐づく GAS のプロジェクトを返す。.clasp.json がなければ nil
-func (a *App) GetGasProject() (*GasProject, error) {
+// claspConfig は clasp の --project に渡す .clasp.json のパス
+func claspConfig(repo string, p *claspProject) string {
+	return filepath.Join(repo, filepath.FromSlash(p.Dir), ".clasp.json")
+}
+
+// GetGasProjects は今のリポジトリに紐づく GAS のプロジェクトを返す。直下のものを先に、あとは gas/ の下の名前順に並べる
+func (a *App) GetGasProjects() ([]GasProject, error) {
+	projects := []GasProject{}
 	dir := a.dir()
 	if dir == "" {
-		return nil, nil
+		return projects, nil
 	}
-	p, err := readClaspProject(dir)
-	if err != nil || p == nil {
-		return nil, err
+	list, err := gasProjects(dir)
+	if err != nil {
+		return projects, err
 	}
-	project := &GasProject{
+	c := loadConfig()
+	for _, p := range list {
+		projects = append(projects, gasProjectInfo(p, c))
+	}
+	return projects, nil
+}
+
+func gasProjectInfo(p *claspProject, c config) GasProject {
+	project := GasProject{
+		Dir:       p.Dir,
 		ScriptID:  p.ScriptID,
 		RootDir:   p.RootDir,
 		EditorURL: "https://script.google.com/d/" + p.ScriptID + "/edit",
@@ -467,10 +520,10 @@ func (a *App) GetGasProject() (*GasProject, error) {
 	if p.ParentID != "" {
 		project.ContainerURL = "https://drive.google.com/open?id=" + url.QueryEscape(p.ParentID)
 	}
-	if rec, ok := loadConfig().GasSync[p.ScriptID]; ok {
+	if rec, ok := c.GasSync[p.ScriptID]; ok {
 		project.LastSync = &rec.GasSync
 	}
-	return project, nil
+	return project
 }
 
 // gasState は今のブランチとコミット（短いハッシュ）と、GAS のファイルにコミットしていない変更があるかを返す
@@ -505,9 +558,9 @@ func (a *App) saveGasSync(p *claspProject, snap gasSnapshot, action string) erro
 }
 
 // PrepareGasPush は GAS 側の今の中身を取ってきて、反映すると上書きされる変更がないかを調べる。まだ反映はしない
-func (a *App) PrepareGasPush() (GasPushPlan, error) {
+func (a *App) PrepareGasPush(project string) (GasPushPlan, error) {
 	plan := GasPushPlan{Overwritten: []string{}, Lost: []string{}}
-	dir, p, err := a.gasProject()
+	dir, p, err := a.gasProject(project)
 	if err != nil {
 		return plan, err
 	}
@@ -552,11 +605,11 @@ func overwrittenFiles(remote, local gasSnapshot, rec gasSyncRecord, synced bool)
 
 // PushGas は手元の GAS のファイルで GAS 側を置き換える。
 // GAS 側の中身が expected（PrepareGasPush で確かめたもの）から変わっていたら止める
-func (a *App) PushGas(expected string) error {
+func (a *App) PushGas(project, expected string) error {
 	if !sha256Hex.MatchString(expected) {
 		return fmt.Errorf("確かめた GAS の中身が正しくありません: %q", expected)
 	}
-	dir, p, err := a.gasProject()
+	dir, p, err := a.gasProject(project)
 	if err != nil {
 		return err
 	}
@@ -569,7 +622,7 @@ func (a *App) PushGas(expected string) error {
 		return fmt.Errorf("確かめた後に GAS 側の中身が変わったので、反映せずに止めました。もう一度確かめてください")
 	}
 	// 確認は済ませているので、マニフェスト（appsscript.json）の上書きも聞かずに進める
-	if _, err := runClasp(dir, "push", "--force", "--project", filepath.Join(dir, ".clasp.json")); err != nil {
+	if _, err := runClasp(filepath.Dir(claspConfig(dir, p)), "push", "--force", "--project", claspConfig(dir, p)); err != nil {
 		return err
 	}
 	// GAS 側で appsscript.json の書き方が整えられることがあるので、反映後の中身を取ってきて記録する。
@@ -586,8 +639,8 @@ func (a *App) PushGas(expected string) error {
 
 // PullGas は GAS 側の今の中身を手元に取り込む。手元の GAS のファイルにコミットしていない変更があれば、上書きしないよう断る。
 // 取り込んだ差分は git の変更として見えるので、気に入らなければ戻せる
-func (a *App) PullGas() error {
-	dir, p, err := a.gasProject()
+func (a *App) PullGas(project string) error {
+	dir, p, err := a.gasProject(project)
 	if err != nil {
 		return err
 	}
@@ -658,96 +711,66 @@ func parseScriptID(input string) (string, error) {
 	return "", fmt.Errorf("Apps Script エディタの URL ではないようです: %q", input)
 }
 
-// isEmptyDir は dir が空のフォルダーか。macOS の Finder が置く .DS_Store はないものとして扱う
-func isEmptyDir(dir string) (bool, error) {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return false, err
-	}
-	for _, e := range entries {
-		if e.Name() != ".DS_Store" {
-			return false, nil
-		}
-	}
-	return true, nil
-}
-
-// clearDir は失敗したときの後始末に、空だった dir に足したものを消す。dir そのものは選ばれたフォルダーなので残す
-func clearDir(dir string) {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return
-	}
-	for _, e := range entries {
-		if e.Name() != ".DS_Store" {
-			os.RemoveAll(filepath.Join(dir, e.Name()))
-		}
-	}
-}
-
-// newGasProjectDir は GAS のプロジェクトを置くフォルダーをダイアログで選ばせ、そこで git init する。
-// ダイアログで新しいフォルダーも作れる。今あるファイルを上書きしないよう、空のフォルダーだけを受け付ける。
-// 選ぶのをやめたら空を返す
-func (a *App) newGasProjectDir() (string, error) {
-	home, _ := os.UserHomeDir()
-	dir, err := runtime.OpenDirectoryDialog(a.ctx, runtime.OpenDialogOptions{
-		Title:                "GAS のプロジェクトを置く空のフォルダーを選択（新しいフォルダーも作れます）",
-		DefaultDirectory:     home,
-		CanCreateDirectories: true,
-	})
-	if err != nil || dir == "" {
-		return "", err
-	}
-	if dir, err = filepath.EvalSymlinks(dir); err != nil {
-		return "", err
-	}
-	empty, err := isEmptyDir(dir)
-	if err != nil {
-		return "", err
-	}
-	if !empty {
-		return "", fmt.Errorf("%s は空のフォルダーではありません。中身を上書きしないよう、空のフォルダーを選ぶか新しく作ってください", dir)
-	}
-	if _, err := runGitIn(dir, "init"); err != nil {
-		clearDir(dir)
-		return "", err
-	}
-	// clasp が中身を書く前に作っておく
-	if err := os.Mkdir(filepath.Join(dir, gasRootDir), 0o755); err != nil {
-		clearDir(dir)
-		return "", err
-	}
-	return dir, nil
-}
-
-// CloneGasScript は、貼られた URL の GAS を選んだフォルダーに取り込んでリポジトリにし、そこに切り替える。
-// 作ったリポジトリのパスを返す。フォルダーを選ぶのをやめたら空を返す
-func (a *App) CloneGasScript(input string) (string, error) {
+// CloneGasScript は、貼られた URL の GAS を今のリポジトリの gas/{name}/ に取り込む
+func (a *App) CloneGasScript(name, input string) error {
 	id, err := parseScriptID(input)
 	if err != nil {
-		return "", err
+		return err
 	}
-	dir, err := a.newGasProjectDir()
-	if err != nil || dir == "" {
-		return "", err
+	repo, dir, err := a.newGasProject(name)
+	if err != nil {
+		return err
 	}
-	// clasp clone-script は上のフォルダーの .clasp.json を見つけると断るので、自分で .clasp.json を書いて pull する
-	config := filepath.Join(dir, ".clasp.json")
-	if err := writeClaspConfig(config, map[string]any{"scriptId": id, "rootDir": gasRootDir}); err != nil {
-		clearDir(dir)
-		return "", err
+	if err := cloneGasScript(dir, id); err != nil {
+		os.RemoveAll(dir)
+		return err
 	}
-	if _, err := runClasp(dir, "pull", "--project", config); err != nil {
-		clearDir(dir)
-		return "", err
-	}
-	return a.finishGasProject(dir)
+	return a.finishGasProject(repo, name)
 }
 
-// CreateGasScript は選んだフォルダーに GAS を新しく作ってリポジトリにし、そこに切り替える。
-// kind が sheets などなら、紐づくスプレッドシートなども Google ドライブに作る。
-// 作ったリポジトリのパスを返す。フォルダーを選ぶのをやめたら空を返す
-func (a *App) CreateGasScript(title, kind string) (string, error) {
+// CreateGasScript は、今のリポジトリの gas/{name}/ に GAS を新しく作る。
+// kind が sheets などなら、紐づくスプレッドシートなども Google ドライブに作る
+func (a *App) CreateGasScript(name, title, kind string) error {
+	title, err := checkGasScript(title, kind)
+	if err != nil {
+		return err
+	}
+	repo, dir, err := a.newGasProject(name)
+	if err != nil {
+		return err
+	}
+	if err := createGasScript(dir, title, kind); err != nil {
+		os.RemoveAll(dir)
+		return err
+	}
+	return a.finishGasProject(repo, name)
+}
+
+// newGasProject は今のリポジトリに gas/{name}/ を作る。もうあれば、中身を上書きしないよう断る
+func (a *App) newGasProject(name string) (repo, dir string, err error) {
+	if !gasProjectName.MatchString(name) {
+		return "", "", fmt.Errorf("名前は英数字と . _ - で付けてください（例: sales-report）: %q", name)
+	}
+	if a.dir() == "" {
+		return "", "", errNoRepository
+	}
+	// clasp はパスの途中にシンボリックリンクがあると断る
+	if repo, err = filepath.EvalSymlinks(a.dir()); err != nil {
+		return "", "", err
+	}
+	dir = filepath.Join(repo, gasProjectsDir, name)
+	if fileExists(dir) {
+		return "", "", fmt.Errorf("%s/%s はもうあります。別の名前にしてください", gasProjectsDir, name)
+	}
+	// clasp が中身を書く前に作っておく
+	if err := os.MkdirAll(filepath.Join(dir, gasRootDir), 0o755); err != nil {
+		return "", "", err
+	}
+	return repo, dir, nil
+}
+
+// checkGasScript は新しく作る GAS のタイトルと種類を確かめ、前後の空白を除いたタイトルを返す
+func checkGasScript(title, kind string) (string, error) {
 	title = strings.TrimSpace(title)
 	if title == "" || strings.IndexFunc(title, unicode.IsControl) >= 0 {
 		return "", fmt.Errorf("タイトルが正しくありません: %q", title)
@@ -755,64 +778,107 @@ func (a *App) CreateGasScript(title, kind string) (string, error) {
 	if !slices.Contains(gasScriptTypes, kind) {
 		return "", fmt.Errorf("GAS の種類が正しくありません: %q", kind)
 	}
-	dir, err := a.newGasProjectDir()
-	if err != nil || dir == "" {
-		return "", err
-	}
-	// --project にフォルダーを渡し、上のフォルダーの .clasp.json を見つけないようにする。
-	// 値が - で始まってもオプションと読まれないよう = でつなぐ
-	if _, err := runClasp(dir, "create-script", "--title="+title, "--type="+kind, "--rootDir="+gasRootDir, "--project", dir); err != nil {
-		clearDir(dir)
-		return "", err
-	}
-	return a.finishGasProject(dir)
+	return title, nil
 }
 
-// finishGasProject は取り込んだ・作った GAS のリポジトリに CLAUDE.md と .gitignore を置き、そこに切り替える
-func (a *App) finishGasProject(dir string) (string, error) {
-	p, err := readClaspProject(dir)
+// cloneGasScript は dir に GAS の中身を取り込む。
+// clasp clone-script は上のフォルダーの .clasp.json を見つけると断るので、自分で .clasp.json を書いて pull する
+func cloneGasScript(dir, id string) error {
+	config := filepath.Join(dir, ".clasp.json")
+	if err := writeClaspConfig(config, map[string]any{"scriptId": id, "rootDir": gasRootDir}); err != nil {
+		return err
+	}
+	_, err := runClasp(dir, "pull", "--project", config)
+	return err
+}
+
+// createGasScript は dir に GAS を新しく作る。
+// --project にフォルダーを渡し、上のフォルダーの .clasp.json を見つけないようにする。
+// 値が - で始まってもオプションと読まれないよう = でつなぐ
+func createGasScript(dir, title, kind string) error {
+	_, err := runClasp(dir, "create-script", "--title="+title, "--type="+kind, "--rootDir="+gasRootDir, "--project", dir)
+	return err
+}
+
+// finishGasProject は今のリポジトリに足した gas/{name}/ に CLAUDE.md と .gitignore を置き、
+// 取り込んだばかりの手元の中身を GAS 側と同じものとして記録する。リポジトリ直下の CLAUDE.md にも、GAS の置き場所を書き足す
+func (a *App) finishGasProject(repo, name string) error {
+	dir := gasProjectsDir + "/" + name
+	p, err := readClaspProject(repo, dir)
 	if err == nil && p == nil {
 		err = fmt.Errorf("clasp が .clasp.json を作りませんでした")
 	}
 	if err != nil {
-		return "", err
+		return err
 	}
-	for name, content := range map[string]string{"CLAUDE.md": gasClaudeMd, ".gitignore": gasGitignore} {
-		file := filepath.Join(dir, name)
-		if _, err := os.Lstat(file); err == nil {
-			continue
-		}
-		if err := os.WriteFile(file, []byte(content), 0o644); err != nil {
-			return "", err
+	for file, content := range map[string]string{"CLAUDE.md": gasClaudeMd(dir), ".gitignore": gasGitignore} {
+		if err := writeNewFile(filepath.Join(repo, filepath.FromSlash(dir), file), content); err != nil {
+			return err
 		}
 	}
-	root, err := repoRoot(dir)
-	if err != nil {
-		return "", err
+	if err := appendGasProjectsNote(repo); err != nil {
+		return err
 	}
-	a.switchRepository(root)
-	// 取り込んだばかりの手元の中身は GAS 側と同じ
-	snap, err := readSnapshot(filepath.Join(root, filepath.FromSlash(p.RootDir)), p)
+	snap, err := readSnapshot(filepath.Join(repo, filepath.FromSlash(p.RootDir)), p)
 	if err != nil {
-		return root, err
+		return err
 	}
-	return root, a.saveGasSync(p, snap, "clone")
+	return a.saveGasSync(p, snap, "clone")
 }
 
-// GAS のリポジトリに置く CLAUDE.md。チャットの Claude が GAS の前提で書けるようにする
-const gasClaudeMd = `# Apps Script プロジェクト
+// appendGasProjectsNote はリポジトリ直下の CLAUDE.md に、gas/ の下に GAS を置いていることを書き足す。
+// Claude Code は gas/{project}/CLAUDE.md をそのフォルダーを触るまで読まないので、置き場所だけは直下にも書く
+func appendGasProjectsNote(repo string) error {
+	file := filepath.Join(repo, "CLAUDE.md")
+	data, err := os.ReadFile(file)
+	if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	if strings.Contains(string(data), gasProjectsNote) {
+		return nil
+	}
+	text := gasProjectsNote
+	if len(data) > 0 {
+		text = "\n" + text
+		if !strings.HasSuffix(string(data), "\n") {
+			text = "\n" + text
+		}
+	}
+	f, err := os.OpenFile(file, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		return err
+	}
+	if _, err := f.WriteString(text); err != nil {
+		f.Close()
+		return err
+	}
+	return f.Close()
+}
 
-このリポジトリは Google Apps Script（GAS）のプロジェクトで、clasp で GAS と同期している。
+// リポジトリ直下の CLAUDE.md に書き足す、GAS の置き場所の説明。もう書いてあるかもこの文面で見分ける
+const gasProjectsNote = `## Apps Script（GAS）
+
+- ` + "`" + gasProjectsDir + "/`" + ` の下のフォルダーが、それぞれ 1 つの GAS のプロジェクト。GAS のファイルは ` + "`" + gasProjectsDir + "/{project}/" + gasRootDir + "/`" + ` に置く
+- GAS のコードを読み書きする前に、そのフォルダーの CLAUDE.md を読む
+`
+
+// gas/{project}/ に置く CLAUDE.md。チャットの Claude が GAS の前提で書けるようにする。dir はそのプロジェクトの場所
+func gasClaudeMd(dir string) string {
+	return `# Apps Script プロジェクト
+
+このフォルダー（` + dir + `）は Google Apps Script（GAS）のプロジェクトで、clasp で GAS と同期している。
 
 - GAS のファイルは ` + "`" + gasRootDir + "/`" + ` に置く。ここにある .js / .gs / .html と appsscript.json だけが GAS に送られる
 - V8 ランタイムの JavaScript で書く。npm のパッケージや import / export は使えない。別のファイルの関数もそのまま呼べる
+- ` + "`../`" + ` のほかのフォルダーは別の GAS のプロジェクト。そこの関数は呼べない
 - Gmail やドライブなど新しいサービスを使うときは、appsscript.json の oauthScopes も見直す
 - 1 回の実行は 6 分までなど GAS には制限がある。スプレッドシートの読み書きは getValues / setValues でまとめて行う
 - ` + "`.clasp.json`" + ` のスクリプト ID は書き換えない
 - ` + "`clasp push`" + ` や ` + "`clasp pull`" + `、デプロイなど GAS 側を変える操作は実行しない。GAS への反映は Hidume の画面から人が行う
 `
+}
 
-// GAS のリポジトリに置く .gitignore。.clasp.json はスクリプト ID などだけで秘密ではなく、
+// gas/{project}/ に置く .gitignore。.clasp.json はスクリプト ID などだけで秘密ではなく、
 // ほかの人やワークツリーでもそのまま反映できるようコミットする
 const gasGitignore = `# clasp の認証情報
 .clasprc.json

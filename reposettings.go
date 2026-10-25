@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"path"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -96,6 +97,7 @@ type repoSettingsState struct {
 	rules         []branchRule
 	secrets       []string
 	gas           bool
+	gasProjects   []*claspProject
 	// GAS のプロジェクトのことで CD を置けない理由
 	gasBlocked string
 }
@@ -142,10 +144,19 @@ func (a *App) GetRepoSettings() (RepoSettings, error) {
 func (a *App) repoSettingsState() repoSettingsState {
 	var st repoSettingsState
 	dir := a.dir()
-	if p, err := readClaspProject(dir); err == nil && p != nil {
+	if projects, err := gasProjects(dir); err == nil && len(projects) > 0 {
 		st.gas = true
-		if out, err := a.runGit("check-ignore", "-q", "--", ".clasp.json"); err == nil && out == "" {
-			st.gasBlocked = ".clasp.json が .gitignore で外されているので、GitHub からどの GAS に反映すればよいかわかりません。.clasp.json をコミットしてください"
+		st.gasProjects = projects
+		for _, p := range projects {
+			config := path.Join(p.Dir, ".clasp.json")
+			if out, err := a.runGit("check-ignore", "-q", "--", config); err == nil && out == "" {
+				st.gasBlocked = config + " が .gitignore で外されているので、GitHub からどの GAS に反映すればよいかわかりません。" + config + " をコミットしてください"
+				break
+			}
+		}
+		// マージで変わったプロジェクトだけを反映するワークフローはまだないので、1 つのときだけ置く
+		if len(projects) > 1 {
+			st.gasBlocked = firstNonEmpty(st.gasBlocked, "GAS が複数あるリポジトリでは、まだ使えません。GAS への反映はこの画面から行ってください")
 		}
 		if !fileExists(claspCredentialsPath()) {
 			st.gasBlocked = firstNonEmpty(st.gasBlocked, "clasp で Google にログインしてから設定してください")
@@ -313,7 +324,10 @@ func (a *App) applyCD(dir string) error {
 			return err
 		}
 	}
-	return writeNewFile(filepath.Join(dir, cdWorkflowPath), cdWorkflow(st.repo.DefaultBranch))
+	if len(st.gasProjects) != 1 {
+		return fmt.Errorf("GAS が 1 つのリポジトリでだけ設定できます")
+	}
+	return writeNewFile(filepath.Join(dir, cdWorkflowPath), cdWorkflow(st.repo.DefaultBranch, st.gasProjects[0].Dir))
 }
 
 // ghHasWorkflowScope は gh のログインに workflow の権限があるか。権限の一覧が出ないトークン（細かく権限を決めたものなど）なら、あるものとする
@@ -578,14 +592,13 @@ jobs:
         with:
           node-version: lts/*
 
-      # .clasp.json の rootDir の下の .js / .gs を、実行せずに読み込んで文法を確かめる
+      # 直下と gas/{project}/ の .clasp.json の rootDir の下の .js / .gs を、実行せずに読み込んで文法を確かめる
       - name: Check syntax
         run: |
           node - <<'EOF'
           const fs = require('fs');
           const path = require('path');
           const vm = require('vm');
-          const clasp = JSON.parse(fs.readFileSync('.clasp.json', 'utf8'));
           let failed = false;
           const fail = (file, message) => {
             failed = true;
@@ -613,7 +626,17 @@ jobs:
               }
             }
           };
-          walk(clasp.rootDir || clasp.srcDir || '.');
+          const configs = ['.clasp.json'];
+          if (fs.existsSync('` + gasProjectsDir + `')) {
+            for (const entry of fs.readdirSync('` + gasProjectsDir + `', {withFileTypes: true})) {
+              if (entry.isDirectory()) configs.push(path.join('` + gasProjectsDir + `', entry.name, '.clasp.json'));
+            }
+          }
+          for (const config of configs.filter((c) => fs.existsSync(c))) {
+            // clasp と同じく、rootDir は .clasp.json の場所から数える
+            const clasp = JSON.parse(fs.readFileSync(config, 'utf8'));
+            walk(path.join(path.dirname(config), clasp.rootDir || clasp.srcDir || '.'));
+          }
           process.exit(failed ? 1 : 0);
           EOF
 
@@ -625,9 +648,14 @@ jobs:
           npm run test --if-present
 `
 
-// cdWorkflow はデフォルトブランチ branch にマージしたら GAS に反映するワークフローを作る
-func cdWorkflow(branch string) string {
+// cdWorkflow はデフォルトブランチ branch にマージしたら GAS に反映するワークフローを作る。
+// project は .clasp.json を置くディレクトリ（リポジトリからの / 区切りの相対パス）
+func cdWorkflow(branch, project string) string {
 	branchJSON, _ := json.Marshal(branch)
+	push := "clasp push --force"
+	if project != "." {
+		push += " --project " + path.Join(project, ".clasp.json")
+	}
 	return `# hidume が置いた CD。` + branch + ` にマージしたら、その内容で GAS を置き換える
 name: deploy
 
@@ -664,6 +692,6 @@ jobs:
         run: printf '%s' "$CLASPRC_JSON" > ~/.clasprc.json
 
       - name: Push to Apps Script
-        run: clasp push --force
+        run: ` + push + `
 `
 }

@@ -22,7 +22,7 @@ import {
     GeneratePullRequest,
     GetBranchPrefix,
     GetCommits,
-    GetGasProject,
+    GetGasProjects,
     GetGasSetup,
     GetGitHubOwners,
     GetHistory,
@@ -255,14 +255,15 @@ const GAS_SETTINGS_URL = 'https://script.google.com/home/usersettings';
 const isGasApiDisabled = (e: string) => e.includes('Apps Script API が有効になっていません');
 const isGasLoggedOut = (e: string) => e.includes('Google にログインしていないか');
 
-// GAS を始める流れと、GAS への反映・取り込みの確認
+// GAS を始める流れと、GAS への反映・取り込みの確認。
+// name は今のリポジトリの gas/{name}/ の名前。dir は反映・取り込みする GAS のプロジェクトの場所（GasProject の dir）
 type GasFlow =
     | { step: 'menu' }
-    | { step: 'clone'; url: string }
-    | { step: 'create'; kind: string; title: string }
+    | { step: 'clone'; url: string; name: string }
+    | { step: 'create'; kind: string; title: string; name: string }
     // 反映の確認。plan は GAS 側を確かめている間は null
-    | { step: 'push'; plan: main.GasPushPlan | null }
-    | { step: 'pull' };
+    | { step: 'push'; dir: string; plan: main.GasPushPlan | null }
+    | { step: 'pull'; dir: string };
 // おすすめのリポジトリ設定。キーは Go 側の設定の ID。並びは Go 側が返す順にする
 const REPO_SETTINGS: Record<string, { label: string; about: string; done: string }> = {
     'require-pr': {
@@ -387,8 +388,8 @@ function App() {
     // push など時間のかかる操作の最中に、ヒヅメくんが言うこと
     const [busy, setBusy] = useState<string | null>(null);
     const [setup, setSetup] = useState<SetupFlow | null>(null);
-    // 開いているリポジトリに紐づく GAS。.clasp.json がなければ null
-    const [gasProject, setGasProject] = useState<main.GasProject | null>(null);
+    // 開いているリポジトリに紐づく GAS。直下と gas/{project}/ の .clasp.json の数だけある
+    const [gasProjects, setGasProjects] = useState<main.GasProject[]>([]);
     const [gasFlow, setGasFlow] = useState<GasFlow | null>(null);
     const [settingsFlow, setSettingsFlow] = useState<SettingsFlow | null>(null);
 
@@ -419,15 +420,15 @@ function App() {
                     setCommits([]);
                     setPushStatus(null);
                     setMergeStatus(null);
-                    setGasProject(null);
+                    setGasProjects([]);
                     setDelegatedMerge(false);
                     setLoadError('');
                     return;
                 }
                 // .clasp.json が壊れていても git の表示は続けられるよう、GAS の失敗はエラーを出すだけにする
-                const gas = GetGasProject().catch((e) => {
+                const gas = GetGasProjects().catch((e) => {
                     onError(e);
-                    return null;
+                    return [];
                 });
                 return Promise.all([GetStatus(), GetCommits(COMMIT_LIMIT), GetPushStatus(), GetMergeStatus(), gas])
                     .then(([s, c, p, m, g]) => {
@@ -435,7 +436,7 @@ function App() {
                         setCommits(c);
                         setPushStatus(p);
                         setMergeStatus(m);
-                        setGasProject(g ?? null);
+                        setGasProjects(g);
                         if (!m.merging) setDelegatedMerge(false);
                         setLoadError('');
                     });
@@ -562,30 +563,30 @@ function App() {
             .finally(() => setBusy(null));
     };
 
-    // 置くフォルダーはダイアログで選ぶ（新しく作ってもよい）。選ぶのをやめたら、入力したところに戻る
+    // 今のリポジトリの gas/{name}/ に置く。CI などもあわせて置けるよう、おすすめ設定を勧める
     const runGasNew = (flow: GasFlow & { step: 'clone' | 'create' }) => {
+        const name = flow.name.trim();
         setGasFlow(null);
-        setBusy(flow.step === 'clone' ? '置くフォルダーを選んでね。選んだら GAS を取り込むよ…' : '置くフォルダーを選んでね。選んだら GAS を作るよ…');
-        (flow.step === 'clone' ? CloneGasScript(flow.url.trim()) : CreateGasScript(flow.title.trim(), flow.kind))
-            .then((dir) => {
-                if (!dir) {
-                    setGasFlow(flow);
-                    return;
-                }
-                const message = flow.step === 'clone' ? `${baseName(dir)} に GAS を取り込んだよ！` : `${baseName(dir)} に GAS を作ったよ！`;
-                switchTo(dir, message);
+        setBusy(flow.step === 'clone' ? 'GAS を取り込んでるよ…' : 'GAS を作ってるよ…');
+        (flow.step === 'clone' ? CloneGasScript(name, flow.url.trim()) : CreateGasScript(name, flow.title.trim(), flow.kind))
+            .then(() => {
+                const message = flow.step === 'clone' ? `gas/${name} に GAS を取り込んだよ！` : `gas/${name} に GAS を作ったよ！`;
+                setReaction(message);
                 offerSettings(message);
             })
             .catch(onError)
-            .finally(() => setBusy(null));
+            .finally(() => {
+                setBusy(null);
+                refresh();
+            });
     };
 
     // ブラウザのエディタでの変更を消さないよう、反映の前に GAS 側の今の中身を確かめる
-    const startGasPush = () => {
+    const startGasPush = (dir: string) => {
         setError('');
-        setGasFlow({step: 'push', plan: null});
-        PrepareGasPush()
-            .then((plan) => setGasFlow((f) => f?.step === 'push' ? {...f, plan} : f))
+        setGasFlow({step: 'push', dir, plan: null});
+        PrepareGasPush(dir)
+            .then((plan) => setGasFlow((f) => f?.step === 'push' && f.dir === dir ? {...f, plan} : f))
             .catch((e) => {
                 setGasFlow(null);
                 onError(e);
@@ -604,9 +605,9 @@ function App() {
             });
     };
 
-    const runGasPush = (expected: string) => runGas('GAS に反映してるよ…', () => PushGas(expected),
+    const runGasPush = (dir: string, expected: string) => runGas('GAS に反映してるよ…', () => PushGas(dir, expected),
         'GAS に反映したよ！ シートやエディタで試してみてね');
-    const runGasPull = () => runGas('GAS の中身を取り込んでるよ…', PullGas,
+    const runGasPull = (dir: string) => runGas('GAS の中身を取り込んでるよ…', () => PullGas(dir),
         'GAS の中身を取り込んだよ！ 変わったところを確かめてからコミットしてね');
 
     const offerSettings = (message: string) => setSettingsFlow({step: 'offer', message});
@@ -1197,36 +1198,44 @@ ${fence}
     } else if (busy) {
         speech = busy;
     } else if (gasFlow?.step === 'menu') {
-        speech = 'GAS（Apps Script）のプロジェクトを用意しよう。今あるスクリプトを取り込む？ それとも新しく作る？';
+        speech = 'GAS（Apps Script）のプロジェクトを、このリポジトリの gas フォルダーに用意しよう。'
+            + '今あるスクリプトを取り込む？ それとも新しく作る？';
         actions = [
-            {label: '今あるものを取り込む', onClick: () => setGasFlow({step: 'clone', url: ''})},
-            {label: '新しく作る', onClick: () => setGasFlow({step: 'create', kind: 'sheets', title: ''})},
+            {label: '今あるものを取り込む', onClick: () => setGasFlow({step: 'clone', url: '', name: ''})},
+            {label: '新しく作る', onClick: () => setGasFlow({step: 'create', kind: 'sheets', title: '', name: ''})},
             {label: 'やめる', onClick: () => setGasFlow(null)},
         ];
     } else if (gasFlow?.step === 'clone') {
         const flow = gasFlow;
-        const ready = !!flow.url.trim();
+        const ready = !!flow.url.trim() && !!flow.name.trim();
         const submit = () => ready && runGasNew(flow);
         speech = '取り込むスクリプトのエディタの URL を教えて。スプレッドシートのメニューの「拡張機能」→「Apps Script」で開けるよ。'
-            + 'そのあと、手元に置く空のフォルダーを選んでね（その場で新しく作れるよ）';
+            + 'それと、gas フォルダーの中で使う名前も英数字で付けてね';
         inputs = [{
             value: flow.url,
-            placeholder: 'https://script.google.com/home/projects/…/edit（⌘ + Enter でフォルダーを選ぶ）',
+            placeholder: 'https://script.google.com/home/projects/…/edit',
             singleLine: true,
             onChange: (url) => setGasFlow({...flow, url}),
             onSubmit: submit,
             onCancel: () => setGasFlow(null),
+        }, {
+            value: flow.name,
+            placeholder: '名前 例: sales-report（⌘ + Enter で取り込む）',
+            singleLine: true,
+            onChange: (name) => setGasFlow({...flow, name}),
+            onSubmit: submit,
+            onCancel: () => setGasFlow(null),
         }];
         actions = [
-            {label: 'フォルダーを選んで取り込む', onClick: submit, disabled: !ready},
+            {label: '取り込む', onClick: submit, disabled: !ready},
             {label: 'やめる', onClick: () => setGasFlow(null)},
         ];
     } else if (gasFlow?.step === 'create') {
         const flow = gasFlow;
-        const ready = !!flow.title.trim();
+        const ready = !!flow.title.trim() && !!flow.name.trim();
         const submit = () => ready && runGasNew(flow);
         speech = '新しく GAS を作るよ。種類とタイトルを教えて。スプレッドシートなどを選ぶと、Google ドライブにそれも作るよ。'
-            + 'そのあと、手元に置く空のフォルダーを選んでね（その場で新しく作れるよ）';
+            + 'それと、gas フォルダーの中で使う名前も英数字で付けてね';
         select = {
             label: '種類',
             value: flow.kind,
@@ -1235,22 +1244,29 @@ ${fence}
         };
         inputs = [{
             value: flow.title,
-            placeholder: 'タイトル 例: 売上レポート（⌘ + Enter でフォルダーを選ぶ）',
+            placeholder: 'タイトル 例: 売上レポート',
             singleLine: true,
             onChange: (title) => setGasFlow({...flow, title}),
             onSubmit: submit,
             onCancel: () => setGasFlow(null),
+        }, {
+            value: flow.name,
+            placeholder: '名前 例: sales-report（⌘ + Enter で作る）',
+            singleLine: true,
+            onChange: (name) => setGasFlow({...flow, name}),
+            onSubmit: submit,
+            onCancel: () => setGasFlow(null),
         }];
         actions = [
-            {label: 'フォルダーを選んで作る', onClick: submit, disabled: !ready},
+            {label: '作る', onClick: submit, disabled: !ready},
             {label: 'やめる', onClick: () => setGasFlow(null)},
         ];
     } else if (gasFlow?.step === 'push' && !gasFlow.plan) {
         speech = 'GAS の今の中身を確かめてるよ…';
         actions = [{label: 'やめる', onClick: () => setGasFlow(null)}];
     } else if (gasFlow?.step === 'push' && gasFlow.plan) {
-        const plan = gasFlow.plan;
-        const push = {label: '反映する', onClick: () => runGasPush(plan.expected)};
+        const {dir, plan} = gasFlow;
+        const push = {label: '反映する', onClick: () => runGasPush(dir, plan.expected)};
         const cancel = {label: 'やめる', onClick: () => setGasFlow(null)};
         const what = `${plan.branch || 'この作業ツリー'}${plan.commit ? ` の ${plan.commit}` : ''}`
             + (plan.dirty ? '（コミットしていない変更も含む）' : '');
@@ -1264,8 +1280,8 @@ ${fence}
             speech = `ブラウザのエディタで変更されたファイルがあるよ: ${shown}${lost}。`
                 + 'このまま反映すると、その変更は上書きされて消えちゃう。先に GAS から取り込む？';
             actions = [
-                {label: '先に取り込む', onClick: () => setGasFlow({step: 'pull'})},
-                {label: '上書きして反映する', danger: true, onClick: () => runGasPush(plan.expected)},
+                {label: '先に取り込む', onClick: () => setGasFlow({step: 'pull', dir})},
+                {label: '上書きして反映する', danger: true, onClick: () => runGasPush(dir, plan.expected)},
                 cancel,
             ];
         } else if (plan.lastBranch && plan.branch && plan.lastBranch !== plan.branch) {
@@ -1276,9 +1292,11 @@ ${fence}
             actions = [push, cancel];
         }
     } else if (gasFlow?.step === 'pull') {
-        speech = `GAS の今の中身を手元の ${gasProject?.rootDir ?? 'src'} に取り込むよ。違うところは変更として出るから、確かめてからコミットしてね。いい？`;
+        const {dir} = gasFlow;
+        const root = gasProjects.find((p) => p.dir === dir)?.rootDir ?? dir;
+        speech = `GAS の今の中身を手元の ${root} に取り込むよ。違うところは変更として出るから、確かめてからコミットしてね。いい？`;
         actions = [
-            {label: '取り込む', onClick: runGasPull},
+            {label: '取り込む', onClick: () => runGasPull(dir)},
             {label: 'やめる', onClick: () => setGasFlow(null)},
         ];
     } else if (settingsFlow?.step === 'offer') {
@@ -1619,10 +1637,9 @@ ${fence}
         actions = [{label: 'Claude に解消してもらう', onClick: () => delegateError(error || loadError)}];
     } else if (repo === '') {
         speech = 'リポジトリを選んでね。git リポジトリじゃないフォルダなら、git init もできるよ。'
-            + 'GAS（Apps Script）を取り込んで始めることもできるよ';
+            + 'GAS（Apps Script）は、リポジトリを開いてから「GAS を始める」で取り込めるよ';
         actions = [
             {label: 'リポジトリを選ぶ', onClick: selectRepository},
-            {label: 'GAS を始める', onClick: startGas},
         ];
     } else if (unborn && branch) {
         speech = 'まだコミットがないよ。最初のコミットを作って、作業用のブランチを切ろうか？'
@@ -1745,14 +1762,18 @@ ${fence}
                             onCreatePullRequest={startPullRequest}
                             onSettings={repo ? () => openSettings() : undefined}
                             onOpen={(url) => OpenURL(url).catch(onError)}>
-                    {gasProject ? (
-                        <GasPane project={gasProject} branch={branch} busy={busy !== null || gasFlow !== null}
-                                 onPush={startGasPush} onPull={() => setGasFlow({step: 'pull'})}
+                    {gasProjects.map((project) => (
+                        <GasPane key={project.dir} project={project} branch={branch} busy={busy !== null || gasFlow !== null}
+                                 onPush={() => startGasPush(project.dir)}
+                                 onPull={() => setGasFlow({step: 'pull', dir: project.dir})}
                                  onOpen={(url) => OpenURL(url).catch(onError)}/>
-                    ) : repo && (
+                    ))}
+                    {repo && (
                         <div className="gas-start">
                             <button className="pr-create" disabled={busy !== null} onClick={startGas}
-                                    title="Apps Script のプロジェクトを取り込むか、新しく作る">GAS を始める</button>
+                                    title="Apps Script のプロジェクトを、このリポジトリの gas フォルダーに取り込むか新しく作る">
+                                {gasProjects.length > 0 ? 'GAS を追加' : 'GAS を始める'}
+                            </button>
                         </div>
                     )}
                 </RemotePane>
@@ -2206,7 +2227,7 @@ function GasPane({project, branch, busy, onPush, onPull, onOpen}: {
 
     return (
         <div className="gas">
-            <h2>Apps Script（GAS）</h2>
+            <h2>Apps Script（GAS）{project.dir !== '.' && ` — ${baseName(project.dir)}`}</h2>
             <p>{line}</p>
             {otherBranch && (
                 <p className="remote-conflict">⚠ 今のブランチ（{branch}）ではなく、{last!.branch} で同期した内容です</p>
