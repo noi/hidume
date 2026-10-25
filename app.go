@@ -356,6 +356,11 @@ func (a *App) runGit(args ...string) (string, error) {
 var errNoRepository = fmt.Errorf("リポジトリが選ばれていません")
 
 func runGitIn(dir string, args ...string) (string, error) {
+	return runGitEnv(dir, nil, args...)
+}
+
+// runGitEnv は runGitIn と同じく実行し、env を環境変数に足す
+func runGitEnv(dir string, env []string, args ...string) (string, error) {
 	// 空だとアプリを起動したディレクトリで動いてしまう
 	if dir == "" {
 		return "", errNoRepository
@@ -364,7 +369,7 @@ func runGitIn(dir string, args ...string) (string, error) {
 	cmd := exec.Command("git", args...)
 	cmd.Dir = dir
 	// 読み取りのついでに .git/index を書き換えない。変更の監視が自分の書き込みに反応しないようにする
-	cmd.Env = append(os.Environ(), "GIT_OPTIONAL_LOCKS=0")
+	cmd.Env = append(append(os.Environ(), "GIT_OPTIONAL_LOCKS=0"), env...)
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {

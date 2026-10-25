@@ -699,7 +699,7 @@ function App() {
             .finally(() => setBusy(null));
     };
 
-    // 空のリポジトリには空の Initial commit を作り、そのまま作業用ブランチを作る流れに進む
+    // 空のリポジトリには Initial commit（おすすめの設定で置いたファイルだけ、なければ空）を作り、そのまま作業用ブランチを作る流れに進む
     const createInitialCommit = () => {
         setBusy('最初のコミットを作ってるよ…');
         CreateInitialCommit()
@@ -1624,7 +1624,8 @@ ${fence}
             {label: 'GAS を始める', onClick: startGas},
         ];
     } else if (unborn && branch) {
-        speech = 'まだコミットがないよ。空の最初のコミットを作って、作業用のブランチを切ろうか？';
+        speech = 'まだコミットがないよ。最初のコミットを作って、作業用のブランチを切ろうか？'
+            + 'おすすめの設定で置いたファイルがあれば、それだけ入れておくよ';
         actions = [
             {label: '作る', onClick: createInitialCommit},
         ];
