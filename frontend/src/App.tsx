@@ -322,16 +322,14 @@ const REPO_SETTINGS: Record<string, { label: string; about: string; done: string
 type SettingsFlow =
     // git init や GitHub にリポジトリを作った直後に、設定するか聞く。message はその前に言うこと
     | { step: 'offer'; message: string }
-    // settings は読み込んでいる間は null。done は直前に設定したときに言うこと
-    | { step: 'menu'; settings: main.RepoSettings | null; picked: string; done: string }
+    // 一覧。項目をクリックすると、その説明と設定するかの確認に進む。
+    // settings は読み込んでいる間は null。done は直前に設定したときに言うこと。
+    // open は読み込めたらそのまま確認に進む項目（権限を足して確かめ直したときなど）
+    | { step: 'menu'; settings: main.RepoSettings | null; done: string; open: string }
+    // 1 つの設定の説明と、設定するかの確認
+    | { step: 'item'; settings: main.RepoSettings; id: string }
     // CD で Google のログイン情報を GitHub に預けてよいか確かめる
     | { step: 'confirmCd'; settings: main.RepoSettings };
-
-// まだ設定していなくて、今設定できるものを先に選んでおく
-const pickSetting = (settings: main.RepoSettings, current = '') => {
-    const ready = settings.settings.find((s) => !s.enabled && !s.blocked);
-    return settings.settings.some((s) => s.id === current) ? current : ready?.id ?? settings.settings[0]?.id ?? '';
-};
 
 // ターミナルでやっていることが終わったかを確かめる間隔
 const SETUP_POLL_MS = 3000;
@@ -613,13 +611,13 @@ function App() {
     const offerSettings = (message: string) => setSettingsFlow({step: 'offer', message});
 
     // GitHub の設定も読むので時間がかかる。読んでいる間も吹き出しは出しておく
-    const openSettings = (done = '', current = '') => {
+    const openSettings = (done = '', open = '') => {
         setError('');
-        setSettingsFlow({step: 'menu', settings: null, picked: current, done});
+        setSettingsFlow({step: 'menu', settings: null, done, open});
         GetRepoSettings()
-            .then((settings) => setSettingsFlow((f) => f?.step === 'menu'
-                ? {...f, settings, picked: pickSetting(settings, current)}
-                : f))
+            .then((settings) => setSettingsFlow((f) => f?.step !== 'menu' ? f
+                : settings.settings.some((s) => s.id === f.open) ? {step: 'item', settings, id: f.open}
+                    : {...f, settings}))
             .catch((e) => {
                 setSettingsFlow(null);
                 onError(e);
@@ -632,7 +630,7 @@ function App() {
         setSettingsFlow(null);
         setBusy(`「${item.label}」を設定してるよ…`);
         ApplyRepoSetting(id)
-            .then(() => openSettings(item.done, id))
+            .then(() => openSettings(item.done))
             .catch(onError)
             .finally(() => {
                 setBusy(null);
@@ -1311,50 +1309,54 @@ ${fence}
     } else if (settingsFlow?.step === 'menu' && settingsFlow.settings) {
         const flow = settingsFlow;
         const settings = flow.settings!;
-        const picked = settings.settings.find((s) => s.id === flow.picked) ?? settings.settings[0];
-        const item = REPO_SETTINGS[picked.id];
-        const close = {label: '閉じる', onClick: () => setSettingsFlow(null)};
-        const done = flow.done ? `${flow.done} ` : '';
+        const rest = settings.settings.filter((s) => !s.enabled && !s.blocked).length;
+        speech = (flow.done ? `${flow.done} ` : '')
+            + (rest > 0 ? '気になる設定をクリックしてね。何をするか説明するよ' : 'できる設定は全部済んでるよ。クリックすると説明を見られるよ');
         list = {
-            value: picked.id,
             items: settings.settings.map((s) => ({
                 value: s.id,
                 label: REPO_SETTINGS[s.id].label,
                 checked: s.enabled,
                 note: s.blocked ? '今は設定できない' : undefined,
             })),
-            onChange: (id) => setSettingsFlow({...flow, picked: id, done: ''}),
+            onPick: (id) => setSettingsFlow({step: 'item', settings, id}),
         };
+        actions = [{label: '閉じる', onClick: () => setSettingsFlow(null)}];
+    } else if (settingsFlow?.step === 'item') {
+        const {settings, id} = settingsFlow;
+        const picked = settings.settings.find((s) => s.id === id)!;
+        const item = REPO_SETTINGS[id];
+        const back = {label: '一覧に戻る', onClick: () => setSettingsFlow({step: 'menu', settings, done: '', open: ''})};
         // CI や CD のファイルをプッシュするには、GitHub のログインに workflow の権限が要る
-        const needsScope = settings.needsWorkflowScope && !picked.enabled && (picked.id === 'ci' || picked.id === 'cd');
+        const needsScope = settings.needsWorkflowScope && !picked.enabled && (id === 'ci' || id === 'cd');
         if (picked.enabled) {
-            speech = `${done}「${item.label}」はもう設定してあるよ。${item.about}`;
-            actions = [close];
+            speech = `「${item.label}」はもう設定してあるよ。${item.about}`;
+            actions = [back];
         } else if (picked.blocked) {
-            speech = `${done}${item.about}。でも今は設定できないよ: ${picked.blocked}`;
-            actions = [close];
+            speech = `${item.about}。でも今は設定できないよ: ${picked.blocked}`;
+            actions = [back];
         } else if (needsScope) {
-            speech = `${done}${item.about}。その前に、GitHub のログインに設定ファイルをプッシュする権限を足す必要があるよ。`
+            speech = `${item.about}。その前に、GitHub のログインに設定ファイルをプッシュする権限を足す必要があるよ。`
                 + 'ターミナルが開くから、そこで許可してね。終わったら「確かめ直す」を押してね';
             actions = [
                 {label: '権限を足す', onClick: () => InstallTool('gh-workflow').catch(onError)},
-                {label: '確かめ直す', onClick: () => openSettings('', picked.id)},
-                close,
+                {label: '確かめ直す', onClick: () => openSettings('', id)},
+                back,
             ];
         } else {
-            speech = `${done}${item.about}。設定する？`;
+            speech = `${item.about}。設定する？`;
             actions = [
                 {
                     label: '設定する',
-                    onClick: () => picked.id === 'cd'
+                    onClick: () => id === 'cd'
                         ? setSettingsFlow({step: 'confirmCd', settings})
-                        : applySetting(picked.id),
+                        : applySetting(id),
                 },
-                close,
+                back,
             ];
         }
     } else if (settingsFlow?.step === 'confirmCd') {
-        const back = () => setSettingsFlow({step: 'menu', settings: settingsFlow.settings, picked: 'cd', done: ''});
+        const back = () => setSettingsFlow({step: 'item', settings: settingsFlow.settings, id: 'cd'});
         speech = 'GitHub から GAS に反映できるように、この Mac の clasp の Google ログイン情報を GitHub のシークレット（秘密の保管場所）に預けるよ。'
             + 'このログイン情報があれば、きみの Google アカウントで GAS やドライブのファイルを扱えちゃう。'
             + 'このリポジトリに書き込める人なら取り出せてしまうから、信頼できる人だけのリポジトリで使ってね。預けて設定する？';

@@ -149,10 +149,6 @@
     background-color: #eef0f3;
 }
 
-.speech-list button.selected {
-    background-color: #dce8f5;
-}
-
 /* 済んだものは緑の塗りにチェック、まだのものは空の枠にする */
 .speech-list-mark {
     flex: none;
