@@ -536,9 +536,10 @@ function App() {
             .then(() => checkSetup(kind))
             .catch(onError);
 
+    // GAS は道具が 1 つでも欠けると使えないので、あとでにしたらその場で準備をやめる。残りの道具の案内も出さない
     const skipTool = (name: string) => {
         setError('');
-        setSetup((s) => s && {...s, skipped: [...s.skipped, name], waiting: null, done: null});
+        setSetup((s) => s && (s.kind === 'gas' ? null : {...s, skipped: [...s.skipped, name], waiting: null, done: null}));
     };
 
     const finishSetup = () => {
@@ -1143,7 +1144,7 @@ ${fence}
         if (busy) {
             speech = busy;
         } else if ((!tool || !item) && setup.kind === 'gas') {
-            // GAS は道具が 1 つでも欠けると使えないので、あとでにしたものがあれば先へ進まない
+            // 知らない道具が欠けているときも、GAS は使えないので先へ進まない
             speech = done + (later
                 ? `${later}が済んでないと GAS は使えないよ。準備ができたら、もう一度「GAS を始める」を押してね`
                 : 'GAS を使う準備ができたよ！');
