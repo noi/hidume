@@ -20,6 +20,25 @@ Go + [Wails v2](https://wails.io/) 製で、フロントエンドは React + Typ
 - [clasp](https://github.com/google/clasp) を使った Google Apps Script の開発（GAS への反映・取り込み）
 - 初回起動時のセットアップ（Homebrew・git・gh・Claude Code のインストールとログイン。macOS のみ）
 
+## インストール
+
+macOS のターミナルで次を実行すると、最新リリースを `/Applications` にインストールする
+（書き込めないときは `~/Applications`）。
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/noi/hidume/main/install.sh | sh
+```
+
+curl でダウンロードしたものには隔離属性が付かないので、Gatekeeper に止められずにそのまま開ける。
+入れ先を変えたいときは `HIDUME_INSTALL_DIR` を指定する。
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/noi/hidume/main/install.sh | HIDUME_INSTALL_DIR=~/Applications sh
+```
+
+[Releases](https://github.com/noi/hidume/releases) から dmg をダウンロードして入れてもよい（初回は後述の
+Gatekeeper の手順が必要）。
+
 ## 使うもの
 
 アプリが呼び出す外部のコマンド。初回のセットアップで入れられる。
@@ -95,6 +114,7 @@ go test ./...
 | `chat.go` / `commitmsg.go` / `prmsg.go` | Claude Code とのチャット、コミットメッセージと PR の文面の生成 |
 | `clasp.go` | Google Apps Script（clasp）との連携 |
 | `setup.go` | 初回のセットアップ |
+| `install.sh` | curl で最新リリースを入れるインストールスクリプト |
 | `config.go` / `history.go` | 設定と作業履歴の保存 |
 | `frontend/` | React + TypeScript のフロントエンド |
 | `frontend/wailsjs/` | Wails が自動生成する Go バインディング（手で編集しない） |
