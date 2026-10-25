@@ -3,7 +3,6 @@ package main
 import (
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"testing"
 )
@@ -96,7 +95,7 @@ func TestAddClaudeDenies(t *testing.T) {
 	if err := os.WriteFile(path, []byte(existing), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := addClaudeDenies(dir, true); err != nil {
+	if err := addClaudeDenies(dir); err != nil {
 		t.Fatal(err)
 	}
 	settings, deny, err := readClaudeSettings(dir)
@@ -106,17 +105,17 @@ func TestAddClaudeDenies(t *testing.T) {
 	if settings["model"] != "opus" || settings["permissions"].(map[string]any)["allow"].([]any)[0] != "Bash(npm test:*)" {
 		t.Errorf("もとの設定が消えました: %v", settings)
 	}
-	if deny[0] != "Read(**/.env)" || deny[1] != "WebFetch" || len(deny) != 1+len(recommendedClaudeDenies(true)) {
+	if deny[0] != "Read(**/.env)" || deny[1] != "WebFetch" || len(deny) != 1+len(claudeSecretDenies) {
 		t.Errorf("deny = %v", deny)
 	}
-	if missing, err := missingClaudeDenies(dir, true); err != nil || len(missing) != 0 {
+	if missing, err := missingClaudeDenies(dir); err != nil || len(missing) != 0 {
 		t.Errorf("missingClaudeDenies = %v, %v", missing, err)
 	}
 }
 
 func TestAddClaudeDeniesNew(t *testing.T) {
 	dir := t.TempDir()
-	if err := addClaudeDenies(dir, false); err != nil {
+	if err := addClaudeDenies(dir); err != nil {
 		t.Fatal(err)
 	}
 	settings, deny, err := readClaudeSettings(dir)
@@ -126,9 +125,6 @@ func TestAddClaudeDeniesNew(t *testing.T) {
 	if settings["$schema"] == nil || len(deny) != len(claudeSecretDenies) {
 		t.Errorf("settings = %v", settings)
 	}
-	if slices.Contains(deny, any("Bash(clasp:*)")) {
-		t.Errorf("GAS でないのに clasp を止めています: %v", deny)
-	}
 }
 
 func TestAddClaudeDeniesBroken(t *testing.T) {
@@ -136,10 +132,45 @@ func TestAddClaudeDeniesBroken(t *testing.T) {
 	path := filepath.Join(dir, claudeSettingsPath)
 	os.MkdirAll(filepath.Dir(path), 0o755)
 	os.WriteFile(path, []byte(`{"permissions": `), 0o644)
-	if err := addClaudeDenies(dir, false); err == nil {
+	if err := addClaudeDenies(dir); err == nil {
 		t.Error("壊れた設定に書き足しました")
 	}
 	if data, _ := os.ReadFile(path); string(data) != `{"permissions": ` {
 		t.Errorf("壊れた設定を書き換えました: %q", data)
+	}
+}
+
+func TestSetClaudeLanguage(t *testing.T) {
+	dir := t.TempDir()
+	if ok, err := hasClaudeLanguage(dir); err != nil || ok {
+		t.Fatalf("hasClaudeLanguage = %v, %v", ok, err)
+	}
+	if err := addClaudeDenies(dir); err != nil {
+		t.Fatal(err)
+	}
+	if err := setClaudeLanguage(dir); err != nil {
+		t.Fatal(err)
+	}
+	settings, deny, err := readClaudeSettings(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 先に書いた deny は残す
+	if settings["language"] != claudeLanguage || len(deny) != len(claudeSecretDenies) {
+		t.Errorf("settings = %v", settings)
+	}
+	if ok, err := hasClaudeLanguage(dir); err != nil || !ok {
+		t.Errorf("hasClaudeLanguage = %v, %v", ok, err)
+	}
+}
+
+func TestHasClaudeLanguageOther(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, claudeSettingsPath)
+	os.MkdirAll(filepath.Dir(path), 0o755)
+	os.WriteFile(path, []byte(`{"language": "english"}`), 0o644)
+	// 人が決めた言葉は日本語でなくても設定済みとして扱い、書き換えない
+	if ok, err := hasClaudeLanguage(dir); err != nil || !ok {
+		t.Errorf("hasClaudeLanguage = %v, %v", ok, err)
 	}
 }

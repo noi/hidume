@@ -24,8 +24,10 @@ const (
 	settingCI = "ci"
 	// デフォルトブランチにマージしたら GAS に反映する
 	settingCD = "cd"
-	// Claude Code に秘密のファイルを読ませず、取り返しのつかない操作をさせない
+	// Claude Code に秘密のファイルを読ませない
 	settingClaude = "claude"
+	// Claude Code に日本語で答えさせる
+	settingClaudeLanguage = "claude-language"
 )
 
 const (
@@ -122,8 +124,10 @@ func (a *App) GetRepoSettings() (RepoSettings, error) {
 		return settings, err
 	}
 	add(settingGitignore, len(ignore) == 0, "")
-	deny, err := missingClaudeDenies(dir, st.gas)
+	deny, err := missingClaudeDenies(dir)
 	add(settingClaude, err == nil && len(deny) == 0, errorText(err))
+	language, err := hasClaudeLanguage(dir)
+	add(settingClaudeLanguage, language, errorText(err))
 	if st.gas {
 		ci := fileExists(filepath.Join(dir, ciWorkflowPath)) && st.hasRequiredCheck(ciCheckName)
 		add(settingCI, ci, st.githubBlocked)
@@ -256,7 +260,9 @@ func (a *App) ApplyRepoSetting(id string) error {
 	case settingCD:
 		return a.applyCD(dir)
 	case settingClaude:
-		return addClaudeDenies(dir, readClaspProjectExists(dir))
+		return addClaudeDenies(dir)
+	case settingClaudeLanguage:
+		return setClaudeLanguage(dir)
 	}
 	return fmt.Errorf("知らない設定です: %q", id)
 }
@@ -341,24 +347,10 @@ var claudeSecretDenies = []string{
 	"Read(**/creds.json)",
 	"Read(**/client_secret*.json)",
 	"Read(~/.clasprc.json)",
-	// 履歴を書き換えて、ほかの人の作業を消してしまう
-	"Bash(git push --force:*)",
-	"Bash(git push -f:*)",
-	"Bash(git push --force-with-lease:*)",
 }
 
-// GAS のリポジトリでは、GAS 側を変える操作をさせない。GAS への反映は hidume の画面から人が行う（gasClaudeMd と合わせる）
-var claudeGasDenies = []string{
-	"Bash(clasp:*)",
-	"Bash(npx clasp:*)",
-}
-
-func recommendedClaudeDenies(gas bool) []string {
-	if gas {
-		return append(slices.Clone(claudeSecretDenies), claudeGasDenies...)
-	}
-	return claudeSecretDenies
-}
+// Claude Code が答える言葉。settings.json の language に書く
+const claudeLanguage = "japanese"
 
 // readClaudeSettings はリポジトリの .claude/settings.json を読む。なければ空。
 // 知らない項目も書き戻すときに残すよう、型を決めずに読む
@@ -382,13 +374,13 @@ func readClaudeSettings(dir string) (map[string]any, []any, error) {
 }
 
 // missingClaudeDenies はおすすめのうち、まだ .claude/settings.json の permissions.deny にないものを返す
-func missingClaudeDenies(dir string, gas bool) ([]string, error) {
+func missingClaudeDenies(dir string) ([]string, error) {
 	_, deny, err := readClaudeSettings(dir)
 	if err != nil {
 		return nil, err
 	}
 	var missing []string
-	for _, rule := range recommendedClaudeDenies(gas) {
+	for _, rule := range claudeSecretDenies {
 		if !slices.Contains(deny, any(rule)) {
 			missing = append(missing, rule)
 		}
@@ -397,12 +389,12 @@ func missingClaudeDenies(dir string, gas bool) ([]string, error) {
 }
 
 // addClaudeDenies はおすすめのうち、まだないものを .claude/settings.json の permissions.deny に足す。ほかの設定はそのまま残す
-func addClaudeDenies(dir string, gas bool) error {
+func addClaudeDenies(dir string) error {
 	settings, deny, err := readClaudeSettings(dir)
 	if err != nil {
 		return err
 	}
-	missing, err := missingClaudeDenies(dir, gas)
+	missing, err := missingClaudeDenies(dir)
 	if err != nil || len(missing) == 0 {
 		return err
 	}
@@ -415,6 +407,30 @@ func addClaudeDenies(dir string, gas bool) error {
 		settings["permissions"] = permissions
 	}
 	permissions["deny"] = deny
+	return writeClaudeSettings(dir, settings)
+}
+
+// hasClaudeLanguage は .claude/settings.json で答える言葉が決まっているか。日本語でなくても、人が決めたものとしてそのままにする
+func hasClaudeLanguage(dir string) (bool, error) {
+	settings, _, err := readClaudeSettings(dir)
+	if err != nil {
+		return false, err
+	}
+	language, _ := settings["language"].(string)
+	return language != "", nil
+}
+
+// setClaudeLanguage は .claude/settings.json の language を日本語にする。ほかの設定はそのまま残す
+func setClaudeLanguage(dir string) error {
+	settings, _, err := readClaudeSettings(dir)
+	if err != nil {
+		return err
+	}
+	settings["language"] = claudeLanguage
+	return writeClaudeSettings(dir, settings)
+}
+
+func writeClaudeSettings(dir string, settings map[string]any) error {
 	if _, ok := settings["$schema"]; !ok {
 		settings["$schema"] = "https://json.schemastore.org/claude-code-settings.json"
 	}
@@ -427,11 +443,6 @@ func addClaudeDenies(dir string, gas bool) error {
 		return err
 	}
 	return os.WriteFile(path, append(data, '\n'), 0o644)
-}
-
-func readClaspProjectExists(dir string) bool {
-	p, err := readClaspProject(dir)
-	return err == nil && p != nil
 }
 
 func errorText(err error) string {
