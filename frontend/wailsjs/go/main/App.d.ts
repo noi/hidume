@@ -66,6 +66,8 @@ export function GetRepoSettings():Promise<main.RepoSettings>;
 
 export function GetRepository():Promise<string>;
 
+export function GetRepositoryName():Promise<string>;
+
 export function GetSetup():Promise<main.SetupStatus>;
 
 export function GetStatus():Promise<Array<main.StatusEntry>>;

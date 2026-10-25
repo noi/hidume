@@ -220,6 +220,15 @@ func (a *App) mainWorktree() (string, error) {
 	return filepath.Dir(common), nil
 }
 
+// GetRepositoryName は GitHub に作るリポジトリ名の既定値として、リポジトリ本体のディレクトリ名を返す。
+// ワークツリーで開いているときも、ワークツリーの名前ではなく本体の名前にする
+func (a *App) GetRepositoryName() string {
+	if main, err := a.mainWorktree(); err == nil {
+		return filepath.Base(main)
+	}
+	return filepath.Base(a.dir())
+}
+
 func requireGh() error {
 	if _, err := exec.LookPath("gh"); err != nil {
 		return fmt.Errorf("GitHub CLI（gh）が見つかりません。インストールして gh auth login してください")

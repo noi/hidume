@@ -140,6 +140,9 @@ func TestMainWorktree(t *testing.T) {
 		if err != nil || got != repo {
 			t.Errorf("mainWorktree() in %s = %q, %v; want %q", dir, got, err, repo)
 		}
+		if got := a.GetRepositoryName(); got != filepath.Base(repo) {
+			t.Errorf("GetRepositoryName() in %s = %q; want %q", dir, got, filepath.Base(repo))
+		}
 	}
 
 	// ワークツリーでは --git-dir が .git にならないことが、gh が断る理由

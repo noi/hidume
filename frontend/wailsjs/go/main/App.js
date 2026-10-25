@@ -130,6 +130,10 @@ export function GetRepository() {
   return window['go']['main']['App']['GetRepository']();
 }
 
+export function GetRepositoryName() {
+  return window['go']['main']['App']['GetRepositoryName']();
+}
+
 export function GetSetup() {
   return window['go']['main']['App']['GetSetup']();
 }

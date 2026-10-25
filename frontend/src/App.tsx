@@ -32,6 +32,7 @@ import {
     GetPushStatus,
     GetRepoSettings,
     GetRepository,
+    GetRepositoryName,
     GetSetup,
     GetStatus,
     PrepareForcePush,
@@ -824,9 +825,14 @@ function App() {
     const pushing: [string, () => Promise<void>] = ['プッシュしてるよ…', Push];
 
     // 作成先は Organization を優先し、既定でも最初の Organization を選んでおく
+    // 名前の既定はリポジトリ本体の名前。ワークツリーで開いていてもワークツリーの名前にはしない
     const startCreate = () => {
-        const value = baseName(repo ?? '') ?? '';
-        setPushFlow({step: 'create', value, owner: '', user: '', owners: null});
+        const initial = baseName(repo ?? '') ?? '';
+        setPushFlow({step: 'create', value: initial, owner: '', user: '', owners: null});
+        // 名前が届く前に打ち始めていたら上書きしない
+        GetRepositoryName()
+            .then((value) => setPushFlow((f) => f?.step === 'create' && f.value === initial ? {...f, value} : f))
+            .catch(() => {});
         GetGitHubOwners()
             .then(({user, orgs}) => {
                 const owners = [
