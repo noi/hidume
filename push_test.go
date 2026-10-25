@@ -1,10 +1,12 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestWebURL(t *testing.T) {
@@ -149,5 +151,32 @@ func TestMainWorktree(t *testing.T) {
 	a.setDir(worktree)
 	if out, _ := a.runGit("rev-parse", "--git-dir"); strings.TrimSpace(out) == ".git" {
 		t.Errorf("worktree git dir is .git: the workaround may no longer be needed")
+	}
+}
+
+// GitHub がまだコミットを受け取りきっていないときだけやり直し、ほかの失敗はすぐ返す
+func TestRetryMissingObjects(t *testing.T) {
+	missing := fmt.Errorf("git push: ! [remote rejected] HEAD -> noi/test (missing necessary objects)")
+	waits := []time.Duration{0, 0}
+	run := func(errs ...error) (int, error) {
+		calls := 0
+		err := retryMissingObjects(waits, func() error {
+			calls++
+			if calls <= len(errs) {
+				return errs[calls-1]
+			}
+			return nil
+		})
+		return calls, err
+	}
+	if calls, err := run(missing, missing); err != nil || calls != 3 {
+		t.Errorf("recovers after retries: calls=%d err=%v", calls, err)
+	}
+	if calls, err := run(missing, missing, missing); err != missing || calls != 3 {
+		t.Errorf("gives up after waits: calls=%d err=%v", calls, err)
+	}
+	other := fmt.Errorf("git push: ! [rejected] main -> main (fetch first)")
+	if calls, err := run(other); err != other || calls != 1 {
+		t.Errorf("other errors are not retried: calls=%d err=%v", calls, err)
 	}
 }
