@@ -178,7 +178,8 @@ func TestClaspError(t *testing.T) {
 }
 
 // fakeClasp は GAS の代わりに remote ディレクトリを使う clasp を PATH に置く。
-// pull は remote から --project の場所の rootDir へ、push はその逆へコピーする
+// pull は remote から --project の場所の rootDir へ、push はその逆へコピーする。
+// remote の下にスクリプト ID と同じ名前のディレクトリがあれば、そのスクリプトの GAS はそこを使う
 func fakeClasp(t *testing.T) (remote string) {
 	t.Helper()
 	bin := t.TempDir()
@@ -200,10 +201,17 @@ if [ "$(cd "$dir" && pwd -P)" != "$dir" ]; then
 fi
 root=$(sed -n 's/.*"rootDir": *"\([^"]*\)".*/\1/p' "$project")
 [ -z "$root" ] && root=.
+id=$(sed -n 's/.*"scriptId": *"\([^"]*\)".*/\1/p' "$project")
+remote="$FAKE_GAS_REMOTE"
+[ -d "$remote/$id" ] && remote="$remote/$id"
+if [ -f "$remote/.fail" ]; then
+  echo "fake failure" >&2
+  exit 1
+fi
 echo "$cmd" >> "$FAKE_GAS_LOG"
 case "$cmd" in
-  pull) mkdir -p "$dir/$root" && cp -R "$FAKE_GAS_REMOTE/." "$dir/$root/" ;;
-  push) rm -rf "$FAKE_GAS_REMOTE"/* && cp -R "$dir/$root/." "$FAKE_GAS_REMOTE/" ;;
+  pull) mkdir -p "$dir/$root" && cp -R "$remote/." "$dir/$root/" ;;
+  push) rm -rf "$remote"/* && cp -R "$dir/$root/." "$remote/" ;;
   *) echo "unknown $cmd" >&2; exit 1 ;;
 esac
 `
@@ -254,7 +262,7 @@ func TestGasPushAndPull(t *testing.T) {
 	a.setDir(repo)
 
 	// 最初の取り込み
-	if err := a.PullGas("."); err != nil {
+	if err := a.PullGas(".", ""); err != nil {
 		t.Fatal(err)
 	}
 	if got := readFile(t, filepath.Join(repo, "src", "Code.js")); got != "v1" {
@@ -264,8 +272,8 @@ func TestGasPushAndPull(t *testing.T) {
 	if err != nil || len(projects) != 1 {
 		t.Fatalf("projects after pull: %+v, %v", projects, err)
 	}
-	if project := projects[0]; project.LastSync == nil || project.LastSync.Action != "pull" || !project.LastSync.Dirty {
-		t.Fatalf("project after pull: %+v", project)
+	if last := projects[0].Targets[0].LastSync; last == nil || last.Action != "pull" || !last.Dirty {
+		t.Fatalf("project after pull: %+v", projects[0])
 	}
 	if _, err := runGitIn(repo, "add", "-A"); err != nil {
 		t.Fatal(err)
@@ -280,10 +288,10 @@ func TestGasPushAndPull(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(plan.Overwritten) != 0 || plan.Unchanged || !plan.Dirty || plan.Commit == "" {
+	if len(plan.Targets) != 1 || len(plan.Targets[0].Overwritten) != 0 || plan.Targets[0].Unchanged || !plan.Dirty || plan.Commit == "" {
 		t.Fatalf("plan: %+v", plan)
 	}
-	if err := a.PushGas(".", plan.Expected); err != nil {
+	if err := a.PushGas(".", expectAll(plan)); err != nil {
 		t.Fatal(err)
 	}
 	if got := readFile(t, filepath.Join(remote, "Code.js")); got != "v2" {
@@ -296,13 +304,13 @@ func TestGasPushAndPull(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !slices.Equal(plan.Overwritten, []string{"Code.js", "New.js"}) || !slices.Equal(plan.Lost, []string{"New.js"}) {
+	if target := plan.Targets[0]; !slices.Equal(target.Overwritten, []string{"Code.js", "New.js"}) || !slices.Equal(target.Lost, []string{"New.js"}) {
 		t.Fatalf("plan after browser edit: %+v", plan)
 	}
 
 	// 確かめた後に GAS 側が変わったら止める
 	writeFiles(t, remote, map[string]string{"Code.js": "browser again"})
-	if err := a.PushGas(".", plan.Expected); err == nil || !strings.Contains(err.Error(), "止めました") {
+	if err := a.PushGas(".", expectAll(plan)); err == nil || !strings.Contains(err.Error(), "止めました") {
 		t.Fatalf("stale push: %v", err)
 	}
 	if got := readFile(t, filepath.Join(remote, "Code.js")); got != "browser again" {
@@ -310,7 +318,7 @@ func TestGasPushAndPull(t *testing.T) {
 	}
 
 	// コミットしていない変更があれば取り込まない
-	if err := a.PullGas("."); err == nil || !strings.Contains(err.Error(), "コミットしていない") {
+	if err := a.PullGas(".", ""); err == nil || !strings.Contains(err.Error(), "コミットしていない") {
 		t.Fatalf("pull with dirty tree: %v", err)
 	}
 	if _, err := runGitIn(repo, "checkout", "--", "src"); err != nil {
@@ -328,7 +336,7 @@ func TestGasPushAndPull(t *testing.T) {
 	if err := os.Remove(filepath.Join(remote, "appsscript.json")); err != nil {
 		t.Fatal(err)
 	}
-	if err := a.PullGas("."); err != nil {
+	if err := a.PullGas(".", ""); err != nil {
 		t.Fatal(err)
 	}
 	if got := readFile(t, filepath.Join(repo, "src", "Code.js")); got != "browser again" {
@@ -343,13 +351,13 @@ func TestGasPushAndPull(t *testing.T) {
 
 	// 取り込んだ直後は、GAS 側にだけある変更はない（手元だけの LocalOnly.js があるので同じではない）
 	plan, err = a.PrepareGasPush(".")
-	if err != nil || plan.Unchanged || len(plan.Overwritten) != 0 {
+	if err != nil || plan.Targets[0].Unchanged || len(plan.Targets[0].Overwritten) != 0 {
 		t.Errorf("plan after pull: %+v, %v", plan, err)
 	}
 	if err := os.Remove(filepath.Join(repo, "src", "LocalOnly.js")); err != nil {
 		t.Fatal(err)
 	}
-	if plan, err = a.PrepareGasPush("."); err != nil || !plan.Unchanged {
+	if plan, err = a.PrepareGasPush("."); err != nil || !plan.Targets[0].Unchanged {
 		t.Errorf("plan when same as GAS: %+v, %v", plan, err)
 	}
 }
@@ -395,23 +403,176 @@ func TestCloneGasScript(t *testing.T) {
 
 	projects, err := a.GetGasProjects()
 	if err != nil || len(projects) != 1 || projects[0].Dir != "gas/report" || projects[0].RootDir != "gas/report/src" ||
-		projects[0].LastSync == nil || projects[0].LastSync.Action != "clone" {
+		len(projects[0].Targets) != 1 || projects[0].Targets[0].LastSync == nil || projects[0].Targets[0].LastSync.Action != "clone" {
 		t.Fatalf("projects: %+v, %v", projects, err)
 	}
 
 	writeFiles(t, repo, map[string]string{"gas/report/src/Code.js": "v2"})
 	plan, err := a.PrepareGasPush("gas/report")
-	if err != nil || plan.Unchanged || !plan.Dirty {
+	if err != nil || plan.Targets[0].Unchanged || !plan.Dirty {
 		t.Fatalf("plan: %+v, %v", plan, err)
 	}
-	if err := a.PushGas("gas/report", plan.Expected); err != nil {
+	if err := a.PushGas("gas/report", expectAll(plan)); err != nil {
 		t.Fatal(err)
 	}
 	if got := readFile(t, filepath.Join(remote, "Code.js")); got != "v2" {
 		t.Errorf("remote Code.js = %q", got)
 	}
 	// 直下に .clasp.json はないので、直下のプロジェクトとしては扱えない
-	if err := a.PullGas("."); err == nil {
+	if err := a.PullGas(".", ""); err == nil {
 		t.Error("pull without root .clasp.json should fail")
+	}
+}
+
+// expectAll は確かめたすべての反映先に反映するときの、PushGas に渡す中身
+func expectAll(plan GasPushPlan) map[string]string {
+	expected := map[string]string{}
+	for _, t := range plan.Targets {
+		expected[t.Name] = t.Expected
+	}
+	return expected
+}
+
+// .clasp.{name}.json を足すと、同じファイルをどの反映先にも反映し、取り込みは反映先を選んで行う
+func TestGasTargets(t *testing.T) {
+	remote := fakeClasp(t)
+	const (
+		mainID  = "mainmainmainmainmainmainmain"
+		tokyoID = "tokyotokyotokyotokyotokyo"
+		osakaID = "osakaosakaosakaosakaosaka"
+	)
+	writeFiles(t, remote, map[string]string{
+		mainID + "/Code.js":          "v1",
+		mainID + "/appsscript.json":  "{}",
+		tokyoID + "/Code.js":         "function myFunction() {}",
+		tokyoID + "/appsscript.json": "{}",
+		osakaID + "/Code.js":         "function myFunction() {}",
+	})
+	repo, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runGitIn(repo, "init", "-q"); err != nil {
+		t.Fatal(err)
+	}
+	a := &App{}
+	a.setDir(repo)
+	if err := a.CloneGasScript("report", mainID); err != nil {
+		t.Fatal(err)
+	}
+	writeFiles(t, repo, map[string]string{"gas/report/.clasp.json": `{"scriptId":"` + mainID + `","rootDir":"src","parentId":["sheet1"]}`})
+
+	for _, bad := range [][2]string{{"", tokyoID}, {"a.b", tokyoID}, {"tokyo", "abc"}, {"dup", mainID}} {
+		if err := a.AddGasTarget("gas/report", bad[0], bad[1]); err == nil {
+			t.Errorf("AddGasTarget(%q, %q) should fail", bad[0], bad[1])
+		}
+	}
+	// 開けない GAS は足さない
+	writeFiles(t, remote, map[string]string{osakaID + "/.fail": ""})
+	if err := a.AddGasTarget("gas/report", "osaka", osakaID); err == nil || fileExists(filepath.Join(repo, "gas/report/.clasp.osaka.json")) {
+		t.Errorf("unreachable target: %v", err)
+	}
+	if err := os.Remove(filepath.Join(remote, osakaID, ".fail")); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.AddGasTarget("gas/report", "tokyo", "https://script.google.com/d/"+tokyoID+"/edit"); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.AddGasTarget("gas/report", "osaka", osakaID); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.AddGasTarget("gas/report", "tokyo", osakaID); err == nil {
+		t.Error("same name should fail")
+	}
+	// 紐づく先は写さない
+	if got := readFile(t, filepath.Join(repo, "gas/report/.clasp.tokyo.json")); strings.Contains(got, "sheet1") || !strings.Contains(got, tokyoID) {
+		t.Errorf(".clasp.tokyo.json:\n%s", got)
+	}
+
+	projects, err := a.GetGasProjects()
+	if err != nil || len(projects) != 1 {
+		t.Fatalf("projects: %+v, %v", projects, err)
+	}
+	var names []string
+	for _, target := range projects[0].Targets {
+		names = append(names, target.Name+":"+target.ScriptID)
+	}
+	if want := []string{":" + mainID, "osaka:" + osakaID, "tokyo:" + tokyoID}; !slices.Equal(names, want) {
+		t.Errorf("targets = %v; want %v", names, want)
+	}
+	if projects[0].Targets[0].ContainerURL == "" || projects[0].Targets[2].ContainerURL != "" || projects[0].Targets[2].LastSync != nil {
+		t.Errorf("targets: %+v", projects[0].Targets)
+	}
+
+	// 足したばかりの反映先は記録がないので、GAS 側にあるファイルは上書きされるものとして出す
+	writeFiles(t, repo, map[string]string{"gas/report/src/Code.js": "v2"})
+	plan, err := a.PrepareGasPush("gas/report")
+	if err != nil || len(plan.Targets) != 3 {
+		t.Fatalf("plan: %+v, %v", plan, err)
+	}
+	if first := plan.Targets[0]; first.Unchanged || len(first.Overwritten) != 0 {
+		t.Errorf("main plan: %+v", first)
+	}
+	if osaka := plan.Targets[1]; osaka.Name != "osaka" || !slices.Equal(osaka.Overwritten, []string{"Code.js"}) || len(osaka.Lost) != 0 {
+		t.Errorf("osaka plan: %+v", osaka)
+	}
+
+	// 1 つでも確かめた後に変わっていたら、どこにも反映しない
+	writeFiles(t, remote, map[string]string{tokyoID + "/Code.js": "browser"})
+	if err := a.PushGas("gas/report", expectAll(plan)); err == nil || !strings.Contains(err.Error(), "tokyo") {
+		t.Fatalf("stale push: %v", err)
+	}
+	if got := readFile(t, filepath.Join(remote, mainID, "Code.js")); got != "v1" {
+		t.Errorf("stale push must not push anywhere: %q", got)
+	}
+
+	// 選んだ反映先にだけ反映する
+	plan, err = a.PrepareGasPush("gas/report")
+	if err != nil {
+		t.Fatal(err)
+	}
+	expected := expectAll(plan)
+	delete(expected, "tokyo")
+	if err := a.PushGas("gas/report", expected); err != nil {
+		t.Fatal(err)
+	}
+	for id, want := range map[string]string{mainID: "v2", osakaID: "v2", tokyoID: "browser"} {
+		if got := readFile(t, filepath.Join(remote, id, "Code.js")); got != want {
+			t.Errorf("%s Code.js = %q; want %q", id, got, want)
+		}
+	}
+	if err := a.PushGas("gas/report", map[string]string{"nagoya": plan.Targets[0].Expected}); err == nil {
+		t.Error("unknown target should fail")
+	}
+
+	// 取り込みは選んだ反映先から
+	if _, err := runGitIn(repo, "add", "-A"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runGitIn(repo, "-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-qm", "init"); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.PullGas("gas/report", "tokyo"); err != nil {
+		t.Fatal(err)
+	}
+	if got := readFile(t, filepath.Join(repo, "gas/report/src/Code.js")); got != "browser" {
+		t.Errorf("pulled from tokyo: %q", got)
+	}
+
+	// 外すと設定ファイルだけ消え、GAS 側は残る
+	if err := a.RemoveGasTarget("gas/report", ""); err == nil {
+		t.Error("main target cannot be removed")
+	}
+	if err := a.RemoveGasTarget("gas/report", "osaka"); err != nil {
+		t.Fatal(err)
+	}
+	if fileExists(filepath.Join(repo, "gas/report/.clasp.osaka.json")) || !fileExists(filepath.Join(remote, osakaID, "Code.js")) {
+		t.Error("RemoveGasTarget should remove only the config")
+	}
+
+	// rootDir が違う反映先は読まない
+	writeFiles(t, repo, map[string]string{"gas/report/.clasp.bad.json": `{"scriptId":"badbadbadbadbadbadbadbadbad","rootDir":"other"}`})
+	if _, err := a.GetGasProjects(); err == nil || !strings.Contains(err.Error(), "rootDir") {
+		t.Errorf("different rootDir: %v", err)
 	}
 }

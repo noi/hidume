@@ -20,6 +20,8 @@ Go + [Wails v2](https://wails.io/) 製で、フロントエンドは React + Typ
 - [clasp](https://github.com/google/clasp) を使った Google Apps Script の開発（GAS への反映・取り込み）
   - GAS は開いているリポジトリの `gas/{project}/` に取り込むか新しく作る。1 つのリポジトリに複数置け、GAS のファイルは `gas/{project}/src/` に入る
   - リポジトリ直下に `.clasp.json` があるリポジトリも、そのまま扱える
+  - 同じ GAS のファイルを、ドキュメントごとに紐づく別々の GAS にも反映できる（「反映先を追加」）。
+    反映先は `.clasp.json` の横に置く `.clasp.{name}.json` で、「GAS に反映」はすべての反映先にまとめて反映する
 - 初回起動時のセットアップ（Homebrew・git・gh・Claude Code のインストールとログイン。macOS のみ）
 - アップデート（起動時と「設定」→「アップデートを確認…」で新しいリリースを確かめ、dmg を入れ替えて起動し直す）
 

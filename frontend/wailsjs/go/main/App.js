@@ -6,6 +6,10 @@ export function AbortMerge() {
   return window['go']['main']['App']['AbortMerge']();
 }
 
+export function AddGasTarget(arg1, arg2, arg3) {
+  return window['go']['main']['App']['AddGasTarget'](arg1, arg2, arg3);
+}
+
 export function AddToGitignore(arg1) {
   return window['go']['main']['App']['AddToGitignore'](arg1);
 }
@@ -182,8 +186,8 @@ export function PrepareGasPush(arg1) {
   return window['go']['main']['App']['PrepareGasPush'](arg1);
 }
 
-export function PullGas(arg1) {
-  return window['go']['main']['App']['PullGas'](arg1);
+export function PullGas(arg1, arg2) {
+  return window['go']['main']['App']['PullGas'](arg1, arg2);
 }
 
 export function PullUpstream() {
@@ -196,6 +200,10 @@ export function Push() {
 
 export function PushGas(arg1, arg2) {
   return window['go']['main']['App']['PushGas'](arg1, arg2);
+}
+
+export function RemoveGasTarget(arg1, arg2) {
+  return window['go']['main']['App']['RemoveGasTarget'](arg1, arg2);
 }
 
 export function RemoveWorktree() {

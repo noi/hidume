@@ -2,6 +2,7 @@ import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import './App.css';
 import {
     AbortMerge,
+    AddGasTarget,
     AddToGitignore,
     AllowPublicRepository,
     ApplyRepoSetting,
@@ -49,6 +50,7 @@ import {
     PullUpstream,
     Push,
     PushGas,
+    RemoveGasTarget,
     RemoveWorktree,
     RevertTo,
     SelectRepository,
@@ -263,14 +265,21 @@ const isGasApiDisabled = (e: string) => e.includes('Apps Script API が有効に
 const isGasLoggedOut = (e: string) => e.includes('Google にログインしていないか');
 
 // GAS を始める流れと、GAS への反映・取り込みの確認。
-// name は今のリポジトリの gas/{name}/ の名前。dir は反映・取り込みする GAS のプロジェクトの場所（GasProject の dir）
+// name は今のリポジトリの gas/{name}/ の名前。dir は反映・取り込みする GAS のプロジェクトの場所（GasProject の dir）。
+// target は反映先の名前（GasTarget の name）
 type GasFlow =
     | { step: 'menu' }
     | { step: 'clone'; url: string; name: string }
     | { step: 'create'; kind: string; title: string; name: string }
     // 反映の確認。plan は GAS 側を確かめている間は null
     | { step: 'push'; dir: string; plan: main.GasPushPlan | null }
-    | { step: 'pull'; dir: string };
+    | { step: 'pull'; dir: string; target: string }
+    // 反映先を足す。name は .clasp.{name}.json の名前
+    | { step: 'add-target'; dir: string; url: string; name: string }
+    | { step: 'remove-target'; dir: string; target: string };
+
+// 反映先の表示名。.clasp.json のものは名前がない
+const gasTargetLabel = (target: { name: string }) => target.name || 'メイン';
 // おすすめのリポジトリ設定。キーは Go 側の設定の ID。並びは Go 側が返す順にする
 const REPO_SETTINGS: Record<string, { label: string; about: string; done: string }> = {
     'require-pr': {
@@ -639,10 +648,15 @@ function App() {
             });
     };
 
-    const runGasPush = (dir: string, expected: string) => runGas('GAS に反映してるよ…', () => PushGas(dir, expected),
+    const runGasPush = (dir: string, expected: Record<string, string>) => runGas('GAS に反映してるよ…', () => PushGas(dir, expected),
         'GAS に反映したよ！ シートやエディタで試してみてね');
-    const runGasPull = (dir: string) => runGas('GAS の中身を取り込んでるよ…', () => PullGas(dir),
+    const runGasPull = (dir: string, target: string) => runGas('GAS の中身を取り込んでるよ…', () => PullGas(dir, target),
         'GAS の中身を取り込んだよ！ 変わったところを確かめてからコミットしてね');
+    const runGasAddTarget = (dir: string, name: string, url: string) => runGas('反映先の GAS を確かめてるよ…',
+        () => AddGasTarget(dir, name, url),
+        `${name} を反映先に足したよ！ .clasp.${name}.json をコミットしてね。「GAS に反映」でこのドキュメントにも反映できるよ`);
+    const runGasRemoveTarget = (dir: string, target: string) => runGas('反映先を外してるよ…', () => RemoveGasTarget(dir, target),
+        `${target} を反映先から外したよ。変更をコミットしてね`);
 
     const offerSettings = (message: string) => setSettingsFlow({step: 'offer', message});
 
@@ -1303,37 +1317,93 @@ ${fence}
         actions = [{label: 'やめる', onClick: () => setGasFlow(null)}];
     } else if (gasFlow?.step === 'push' && gasFlow.plan) {
         const {dir, plan} = gasFlow;
-        const push = {label: '反映する', onClick: () => runGasPush(dir, plan.expected)};
+        const targets = gasProjects.find((p) => p.dir === dir)?.targets ?? [];
+        const multiple = plan.targets.length > 1;
+        // 中身が同じ反映先には反映しない
+        const changed = plan.targets.filter((t) => !t.unchanged);
+        const expected = Object.fromEntries(changed.map((t) => [t.name, t.expected]));
+        const push = {label: '反映する', onClick: () => runGasPush(dir, expected)};
         const cancel = {label: 'やめる', onClick: () => setGasFlow(null)};
         const what = `${plan.branch || 'この作業ツリー'}${plan.commit ? ` の ${plan.commit}` : ''}`
             + (plan.dirty ? '（コミットしていない変更も含む）' : '');
-        if (plan.unchanged) {
-            speech = '手元と GAS の中身は同じだよ。反映するものはないよ';
+        // 反映先が複数なら、どこに反映するかも言う
+        const where = multiple ? `${changed.map(gasTargetLabel).join('、')} の GAS` : 'GAS';
+        const overwritten = changed.filter((t) => t.overwritten.length > 0);
+        const moved = changed.filter((t) => t.lastBranch && plan.branch && t.lastBranch !== plan.branch);
+        const files = (t: main.GasTargetPlan) => t.overwritten.slice(0, 3).map(baseName).join('、')
+            + (t.overwritten.length > 3 ? ` ほか ${t.overwritten.length - 3} 件` : '')
+            + (t.lost.length > 0 ? `（そのうち ${t.lost.length} 件は手元にないから消えちゃう）` : '');
+        const synced = (t: main.GasTargetPlan) => !!targets.find((x) => x.name === t.name)?.lastSync;
+        if (changed.length === 0) {
+            speech = multiple ? '手元とどの GAS の中身も同じだよ。反映するものはないよ' : '手元と GAS の中身は同じだよ。反映するものはないよ';
             actions = [{label: 'わかった', onClick: () => setGasFlow(null)}];
-        } else if (plan.overwritten.length > 0) {
-            const shown = plan.overwritten.slice(0, 3).map(baseName).join('、')
-                + (plan.overwritten.length > 3 ? ` ほか ${plan.overwritten.length - 3} 件` : '');
-            const lost = plan.lost.length > 0 ? `（そのうち ${plan.lost.length} 件は手元にないから消えちゃう）` : '';
-            speech = `ブラウザのエディタで変更されたファイルがあるよ: ${shown}${lost}。`
-                + 'このまま反映すると、その変更は上書きされて消えちゃう。先に GAS から取り込む？';
+        } else if (overwritten.length > 0) {
+            // まだ同期していない反映先から取り込むと、手元が足したばかりの GAS の中身になってしまうので勧めない
+            const pull = overwritten.length === 1 && synced(overwritten[0]) ? overwritten[0] : null;
+            if (multiple) {
+                speech = 'GAS 側にだけある変更があるよ。'
+                    + overwritten.map((t) => `${gasTargetLabel(t)}${synced(t) ? '' : '（まだ同期していない GAS）'}: ${files(t)}`).join('／')
+                    + '。このまま反映すると、その変更は上書きされて消えちゃう。'
+                    + (pull ? `先に ${gasTargetLabel(pull)} の GAS から取り込む？` : 'いい？');
+            } else {
+                speech = `ブラウザのエディタで変更されたファイルがあるよ: ${files(overwritten[0])}。`
+                    + 'このまま反映すると、その変更は上書きされて消えちゃう。先に GAS から取り込む？';
+            }
             actions = [
-                {label: '先に取り込む', onClick: () => setGasFlow({step: 'pull', dir})},
-                {label: '上書きして反映する', danger: true, onClick: () => runGasPush(dir, plan.expected)},
+                ...(pull || !multiple ? [{label: '先に取り込む', onClick: () => setGasFlow({step: 'pull', dir, target: (pull ?? overwritten[0]).name})}] : []),
+                {label: '上書きして反映する', danger: true, onClick: () => runGasPush(dir, expected)},
                 cancel,
             ];
-        } else if (plan.lastBranch && plan.branch && plan.lastBranch !== plan.branch) {
-            speech = `今 GAS に入っているのは ${plan.lastBranch} の内容だよ。${what}で置き換えるけど、いい？`;
+        } else if (moved.length > 0) {
+            const last = [...new Set(moved.map((t) => t.lastBranch))].join('、');
+            speech = `今 ${multiple ? `${moved.map(gasTargetLabel).join('、')} の ` : ''}GAS に入っているのは ${last} の内容だよ。`
+                + `${what}で置き換えるけど、いい？`;
             actions = [push, cancel];
         } else {
-            speech = `${what}を GAS に反映するよ。いい？`;
+            speech = `${what}を ${where} に反映するよ。いい？`;
             actions = [push, cancel];
         }
     } else if (gasFlow?.step === 'pull') {
-        const {dir} = gasFlow;
-        const root = gasProjects.find((p) => p.dir === dir)?.rootDir ?? dir;
-        speech = `GAS の今の中身を手元の ${root} に取り込むよ。違うところは変更として出るから、確かめてからコミットしてね。いい？`;
+        const {dir, target} = gasFlow;
+        const project = gasProjects.find((p) => p.dir === dir);
+        const root = project?.rootDir ?? dir;
+        const from = (project?.targets.length ?? 0) > 1 ? `${gasTargetLabel({name: target})} の GAS` : 'GAS';
+        speech = `${from}の今の中身を手元の ${root} に取り込むよ。違うところは変更として出るから、確かめてからコミットしてね。いい？`;
         actions = [
-            {label: '取り込む', onClick: () => runGasPull(dir)},
+            {label: '取り込む', onClick: () => runGasPull(dir, target)},
+            {label: 'やめる', onClick: () => setGasFlow(null)},
+        ];
+    } else if (gasFlow?.step === 'add-target') {
+        const flow = gasFlow;
+        const ready = !!flow.url.trim() && !!flow.name.trim();
+        const submit = () => ready && runGasAddTarget(flow.dir, flow.name.trim(), flow.url.trim());
+        speech = 'ほかのドキュメントにも、同じ GAS のファイルを反映できるようにするよ。'
+            + '反映したいドキュメントのメニューの「拡張機能」→「Apps Script」で開いたエディタの URL を教えて。'
+            + 'それと、この反映先の名前も英数字で付けてね';
+        inputs = [{
+            value: flow.url,
+            placeholder: 'https://script.google.com/home/projects/…/edit',
+            singleLine: true,
+            onChange: (url) => setGasFlow({...flow, url}),
+            onSubmit: submit,
+            onCancel: () => setGasFlow(null),
+        }, {
+            value: flow.name,
+            placeholder: '名前 例: tokyo（⌘ + Enter で足す）',
+            singleLine: true,
+            onChange: (name) => setGasFlow({...flow, name}),
+            onSubmit: submit,
+            onCancel: () => setGasFlow(null),
+        }];
+        actions = [
+            {label: '足す', onClick: submit, disabled: !ready},
+            {label: 'やめる', onClick: () => setGasFlow(null)},
+        ];
+    } else if (gasFlow?.step === 'remove-target') {
+        const {dir, target} = gasFlow;
+        speech = `${target} を反映先から外すよ。.clasp.${target}.json を消すだけで、GAS 側の中身はそのまま残るよ。いい？`;
+        actions = [
+            {label: '外す', onClick: () => runGasRemoveTarget(dir, target)},
             {label: 'やめる', onClick: () => setGasFlow(null)},
         ];
     } else if (settingsFlow?.step === 'offer') {
@@ -1824,7 +1894,9 @@ ${fence}
                     {gasProjects.map((project) => (
                         <GasPane key={project.dir} project={project} branch={branch} busy={busy !== null || gasFlow !== null}
                                  onPush={() => startGasPush(project.dir)}
-                                 onPull={() => setGasFlow({step: 'pull', dir: project.dir})}
+                                 onPull={(target) => setGasFlow({step: 'pull', dir: project.dir, target})}
+                                 onAddTarget={() => setGasFlow({step: 'add-target', dir: project.dir, url: '', name: ''})}
+                                 onRemoveTarget={(target) => setGasFlow({step: 'remove-target', dir: project.dir, target})}
                                  onOpen={(url) => OpenURL(url).catch(onError)}/>
                     ))}
                     {repo && (
@@ -2259,16 +2331,62 @@ function RemotePane({push, merge, pullRequest, busy, onCreatePullRequest, onSett
     );
 }
 
-// GAS の状態と操作。GAS 側は 1 つしかないので、今そこに入っているのがどのブランチの内容かを出す
-function GasPane({project, branch, busy, onPush, onPull, onOpen}: {
+// GAS の状態と操作。反映先ごとに GAS 側は 1 つしかないので、今そこに入っているのがどのブランチの内容かを出す。
+// 反映先が複数あれば、反映はまとめて行い、取り込みなどは反映先ごとに行う
+function GasPane({project, branch, busy, onPush, onPull, onAddTarget, onRemoveTarget, onOpen}: {
     project: main.GasProject;
     branch: string;
     busy: boolean;
     onPush: () => void;
-    onPull: () => void;
+    onPull: (target: string) => void;
+    onAddTarget: () => void;
+    onRemoveTarget: (target: string) => void;
     onOpen: (url: string) => void;
 }) {
-    const last = project.lastSync;
+    const multiple = project.targets.length > 1;
+    const targetButtons = (target: main.GasTarget) => (
+        <>
+            <button className="pr-create" disabled={busy} onClick={() => onPull(target.name)}
+                    title={`GAS の今の中身を ${project.rootDir} に取り込む`}>GAS から取り込む</button>
+            <button className="pr-create" onClick={() => onOpen(target.editorUrl)}>エディタを開く</button>
+            {target.containerUrl && (
+                <button className="pr-create" onClick={() => onOpen(target.containerUrl)}
+                        title="この GAS が紐づくスプレッドシートなどを開く">紐づくファイルを開く</button>
+            )}
+        </>
+    );
+
+    return (
+        <div className="gas">
+            <h2>Apps Script（GAS）{project.dir !== '.' && ` — ${baseName(project.dir)}`}</h2>
+            {multiple ? project.targets.map((target) => (
+                <div key={target.name} className="gas-target">
+                    <h3>{gasTargetLabel(target)}</h3>
+                    <GasSyncLine target={target} branch={branch}/>
+                    <div className="gas-actions">
+                        {targetButtons(target)}
+                        {target.name && (
+                            <button className="pr-create" disabled={busy} onClick={() => onRemoveTarget(target.name)}
+                                    title="この反映先を外す。GAS 側の中身はそのまま残る">外す</button>
+                        )}
+                    </div>
+                </div>
+            )) : project.targets[0] && <GasSyncLine target={project.targets[0]} branch={branch}/>}
+            <div className="gas-actions">
+                <button className="pr-create" disabled={busy} onClick={onPush}
+                        title={multiple ? `${project.rootDir} のファイルで、${project.targets.length} か所の GAS をまとめて置き換える`
+                            : `${project.rootDir} のファイルで GAS を置き換える`}>GAS に反映</button>
+                {!multiple && project.targets[0] && targetButtons(project.targets[0])}
+                <button className="pr-create" disabled={busy} onClick={onAddTarget}
+                        title="別のドキュメントに紐づく GAS にも、同じファイルを反映できるようにする">反映先を追加</button>
+            </div>
+        </div>
+    );
+}
+
+// 反映先の GAS と最後に同期したときのこと
+function GasSyncLine({target, branch}: { target: main.GasTarget; branch: string }) {
+    const last = target.lastSync;
     let line: string;
     if (!last) {
         line = 'まだこのアプリで GAS と同期していません';
@@ -2285,24 +2403,12 @@ function GasPane({project, branch, busy, onPush, onPull, onOpen}: {
     const otherBranch = !!last?.branch && !!branch && last.branch !== branch && last.action !== 'clone';
 
     return (
-        <div className="gas">
-            <h2>Apps Script（GAS）{project.dir !== '.' && ` — ${baseName(project.dir)}`}</h2>
+        <>
             <p>{line}</p>
             {otherBranch && (
                 <p className="remote-conflict">⚠ 今のブランチ（{branch}）ではなく、{last!.branch} で同期した内容です</p>
             )}
-            <div className="gas-actions">
-                <button className="pr-create" disabled={busy} onClick={onPush}
-                        title={`${project.rootDir} のファイルで GAS を置き換える`}>GAS に反映</button>
-                <button className="pr-create" disabled={busy} onClick={onPull}
-                        title={`GAS の今の中身を ${project.rootDir} に取り込む`}>GAS から取り込む</button>
-                <button className="pr-create" onClick={() => onOpen(project.editorUrl)}>エディタを開く</button>
-                {project.containerUrl && (
-                    <button className="pr-create" onClick={() => onOpen(project.containerUrl)}
-                            title="この GAS が紐づくスプレッドシートなどを開く">紐づくファイルを開く</button>
-                )}
-            </div>
-        </div>
+        </>
     );
 }
 

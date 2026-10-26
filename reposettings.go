@@ -148,9 +148,19 @@ func (a *App) repoSettingsState() repoSettingsState {
 		st.gas = true
 		st.gasProjects = projects
 		for _, p := range projects {
-			config := path.Join(p.Dir, ".clasp.json")
-			if out, err := a.runGit("check-ignore", "-q", "--", config); err == nil && out == "" {
-				st.gasBlocked = config + " が .gitignore で外されているので、GitHub からどの GAS に反映すればよいかわかりません。" + config + " をコミットしてください"
+			targets, err := gasTargets(dir, p.Dir)
+			if err != nil {
+				st.gasBlocked = err.Error()
+				break
+			}
+			for _, t := range targets {
+				config := targetLabel(t)
+				if out, err := a.runGit("check-ignore", "-q", "--", config); err == nil && out == "" {
+					st.gasBlocked = config + " が .gitignore で外されているので、GitHub からどの GAS に反映すればよいかわかりません。" + config + " をコミットしてください"
+					break
+				}
+			}
+			if st.gasBlocked != "" {
 				break
 			}
 		}
@@ -649,13 +659,21 @@ jobs:
 `
 
 // cdWorkflow はデフォルトブランチ branch にマージしたら GAS に反映するワークフローを作る。
-// project は .clasp.json を置くディレクトリ（リポジトリからの / 区切りの相対パス）
+// project は .clasp.json を置くディレクトリ（リポジトリからの / 区切りの相対パス）。
+// あとから足した反映先にも反映するよう、.clasp.{name}.json は動かすときに探す
 func cdWorkflow(branch, project string) string {
 	branchJSON, _ := json.Marshal(branch)
-	push := "clasp push --force"
-	if project != "." {
-		push += " --project " + path.Join(project, ".clasp.json")
-	}
+	configs := path.Join(project, ".clasp.json") + " " + path.Join(project, ".clasp.*.json")
+	push := `|
+          # 1 つの反映先で失敗しても、ほかの反映先には反映してから失敗にする
+          status=0
+          for config in ` + configs + `; do
+            [ -f "$config" ] || continue
+            echo "::group::$config"
+            clasp push --force --project "$config" || status=1
+            echo "::endgroup::"
+          done
+          exit $status`
 	return `# hidume が置いた CD。` + branch + ` にマージしたら、その内容で GAS を置き換える
 name: deploy
 

@@ -112,23 +112,21 @@ export namespace main {
 	        this.time = source["time"];
 	    }
 	}
-	export class GasProject {
-	    dir: string;
+	export class GasTarget {
+	    name: string;
 	    scriptId: string;
-	    rootDir: string;
 	    editorUrl: string;
 	    containerUrl: string;
 	    lastSync?: GasSync;
 	
 	    static createFrom(source: any = {}) {
-	        return new GasProject(source);
+	        return new GasTarget(source);
 	    }
 	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.dir = source["dir"];
+	        this.name = source["name"];
 	        this.scriptId = source["scriptId"];
-	        this.rootDir = source["rootDir"];
 	        this.editorUrl = source["editorUrl"];
 	        this.containerUrl = source["containerUrl"];
 	        this.lastSync = this.convertValues(source["lastSync"], GasSync);
@@ -152,15 +150,67 @@ export namespace main {
 		    return a;
 		}
 	}
-	export class GasPushPlan {
+	export class GasProject {
+	    dir: string;
+	    rootDir: string;
+	    targets: GasTarget[];
+	
+	    static createFrom(source: any = {}) {
+	        return new GasProject(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.dir = source["dir"];
+	        this.rootDir = source["rootDir"];
+	        this.targets = this.convertValues(source["targets"], GasTarget);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class GasTargetPlan {
+	    name: string;
 	    expected: string;
 	    overwritten: string[];
 	    lost: string[];
 	    unchanged: boolean;
+	    lastBranch: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new GasTargetPlan(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.expected = source["expected"];
+	        this.overwritten = source["overwritten"];
+	        this.lost = source["lost"];
+	        this.unchanged = source["unchanged"];
+	        this.lastBranch = source["lastBranch"];
+	    }
+	}
+	export class GasPushPlan {
+	    targets: GasTargetPlan[];
 	    branch: string;
 	    commit: string;
 	    dirty: boolean;
-	    lastBranch: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new GasPushPlan(source);
@@ -168,16 +218,32 @@ export namespace main {
 	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.expected = source["expected"];
-	        this.overwritten = source["overwritten"];
-	        this.lost = source["lost"];
-	        this.unchanged = source["unchanged"];
+	        this.targets = this.convertValues(source["targets"], GasTargetPlan);
 	        this.branch = source["branch"];
 	        this.commit = source["commit"];
 	        this.dirty = source["dirty"];
-	        this.lastBranch = source["lastBranch"];
 	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
 	}
+	
+	
 	
 	export class GitHubOwners {
 	    user: string;
