@@ -49,6 +49,9 @@ var (
 	sha256Hex = regexp.MustCompile(`^[0-9a-f]{64}$`)
 	// gas/{project}/ の名前。CI / CD のパスにも書くので、記号を含まないものにする
 	gasProjectName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
+	// 反映先を足すときの .clasp.{name}.json の name。ファイル名から読み戻せるよう . は使わない
+	gasTargetName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]*$`)
+	gasTargetFile = regexp.MustCompile(`^\.clasp\.([A-Za-z0-9][A-Za-z0-9_-]*)\.json$`)
 )
 
 // GasSync は最後に GAS と同期（反映・取り込み）したときのこと
@@ -72,13 +75,22 @@ type gasSyncRecord struct {
 	Files map[string]string `json:"files"`
 }
 
-// GasProject はリポジトリに紐づく Apps Script のプロジェクト
+// GasProject はリポジトリに紐づく Apps Script のプロジェクト。
+// 同じ GAS のファイルを、ドキュメントごとに紐づく別々の GAS（反映先）に反映できる
 type GasProject struct {
 	// .clasp.json を置くディレクトリ（リポジトリからの相対パス）。リポジトリ直下なら "."、ほかは gas/{project}
-	Dir      string `json:"dir"`
-	ScriptID string `json:"scriptId"`
-	// GAS のファイルを置くディレクトリ（リポジトリからの相対パス）
-	RootDir   string `json:"rootDir"`
+	Dir string `json:"dir"`
+	// GAS のファイルを置くディレクトリ（リポジトリからの相対パス）。どの反映先にもここのファイルを送る
+	RootDir string `json:"rootDir"`
+	// .clasp.json のものを先に、あとは .clasp.{name}.json の名前順
+	Targets []GasTarget `json:"targets"`
+}
+
+// GasTarget は GAS のファイルを反映する先の、1 つの Apps Script
+type GasTarget struct {
+	// .clasp.json なら空、.clasp.{name}.json なら name
+	Name      string `json:"name"`
+	ScriptID  string `json:"scriptId"`
 	EditorURL string `json:"editorUrl"`
 	// 紐づくスプレッドシートなどの URL。スタンドアロンや、紐づく先が .clasp.json にないときは空
 	ContainerURL string `json:"containerUrl"`
@@ -88,6 +100,18 @@ type GasProject struct {
 
 // GasPushPlan は GAS への反映で何が起きるかを、実行前に見せるための情報
 type GasPushPlan struct {
+	// 反映先ごとに何が起きるか。並びは GasProject の Targets と同じ
+	Targets []GasTargetPlan `json:"targets"`
+	// 反映するブランチとコミット、GAS のファイルにコミットしていない変更があるか
+	Branch string `json:"branch"`
+	Commit string `json:"commit"`
+	Dirty  bool   `json:"dirty"`
+}
+
+// GasTargetPlan は 1 つの反映先に反映すると何が起きるか
+type GasTargetPlan struct {
+	// GasTarget の Name
+	Name string `json:"name"`
 	// 確かめた時点の GAS 側の中身のハッシュ。PushGas に渡し、これから変わっていたら止める
 	Expected string `json:"expected"`
 	// 反映すると上書きされる、GAS 側にだけある変更（ブラウザのエディタで変更されたファイル）
@@ -96,18 +120,16 @@ type GasPushPlan struct {
 	Lost []string `json:"lost"`
 	// 手元と GAS の中身が同じで、反映しても何も変わらない
 	Unchanged bool `json:"unchanged"`
-	// 反映するブランチとコミット、GAS のファイルにコミットしていない変更があるか
-	Branch string `json:"branch"`
-	Commit string `json:"commit"`
-	Dirty  bool   `json:"dirty"`
 	// 前回 GAS と同期したときのブランチ。まだなければ空
 	LastBranch string `json:"lastBranch"`
 }
 
-// claspProject は .clasp.json のうち hidume が使う項目
+// claspProject は .clasp.json のうち hidume が使う項目。反映先ごとに 1 つある
 type claspProject struct {
 	// .clasp.json を置くディレクトリ（リポジトリからの / 区切りの相対パス）。リポジトリ直下なら "."
-	Dir      string
+	Dir string
+	// 反映先の名前。.clasp.json なら空、.clasp.{name}.json なら name
+	Name     string
 	ScriptID string
 	// GAS のファイルを置くディレクトリ（リポジトリからの / 区切りの相対パス）。リポジトリ直下なら "."
 	RootDir          string
@@ -288,9 +310,22 @@ func gasProjects(repo string) ([]*claspProject, error) {
 	return projects, nil
 }
 
+// claspFile は反映先 target の設定ファイルの名前。target が空なら .clasp.json
+func claspFile(target string) string {
+	if target == "" {
+		return ".clasp.json"
+	}
+	return ".clasp." + target + ".json"
+}
+
 // readClaspProject はリポジトリの dir（/ 区切りの相対パス）にある .clasp.json を読む。なければ nil を返す
 func readClaspProject(repo, dir string) (*claspProject, error) {
-	name := path.Join(dir, ".clasp.json")
+	return readClaspTarget(repo, dir, "")
+}
+
+// readClaspTarget はリポジトリの dir にある、反映先 target の設定ファイルを読む。なければ nil を返す
+func readClaspTarget(repo, dir, target string) (*claspProject, error) {
+	name := path.Join(dir, claspFile(target))
 	data, err := os.ReadFile(filepath.Join(repo, filepath.FromSlash(name)))
 	if os.IsNotExist(err) {
 		return nil, nil
@@ -323,6 +358,7 @@ func readClaspProject(repo, dir string) (*claspProject, error) {
 	}
 	p := &claspProject{
 		Dir:              dir,
+		Name:             target,
 		ScriptID:         raw.ScriptID,
 		RootDir:          path.Join(dir, root),
 		ScriptExtensions: extensions(stringList(raw.ScriptExtensions), ".js", ".gs"),
@@ -332,6 +368,50 @@ func readClaspProject(repo, dir string) (*claspProject, error) {
 		p.ParentID = ids[0]
 	}
 	return p, nil
+}
+
+// gasTargets はリポジトリの dir にある GAS のプロジェクトの反映先を返す。.clasp.json のものを先に、あとは名前順。
+// .clasp.json がなければ nil を返す。どの反映先にも同じファイルを送るので、rootDir が .clasp.json と違えばエラーにする
+func gasTargets(repo, dir string) ([]*claspProject, error) {
+	primary, err := readClaspProject(repo, dir)
+	if err != nil || primary == nil {
+		return nil, err
+	}
+	targets := []*claspProject{primary}
+	entries, err := os.ReadDir(filepath.Join(repo, filepath.FromSlash(dir)))
+	if err != nil {
+		return nil, err
+	}
+	// ReadDir は名前順に返す
+	for _, e := range entries {
+		m := gasTargetFile.FindStringSubmatch(e.Name())
+		if m == nil || e.IsDir() {
+			continue
+		}
+		p, err := readClaspTarget(repo, dir, m[1])
+		if err != nil {
+			return nil, err
+		}
+		file := path.Join(dir, e.Name())
+		if p.RootDir != primary.RootDir {
+			return nil, fmt.Errorf("%s の rootDir が .clasp.json と違います。同じ GAS のファイルを反映するので、そろえてください", file)
+		}
+		if slices.ContainsFunc(targets, func(t *claspProject) bool { return t.ScriptID == p.ScriptID }) {
+			return nil, fmt.Errorf("%s のスクリプト ID は、同じフォルダーのほかの .clasp*.json と同じです", file)
+		}
+		targets = append(targets, p)
+	}
+	return targets, nil
+}
+
+// findTarget は反映先の中から名前が name のものを探す
+func findTarget(targets []*claspProject, name string) (*claspProject, error) {
+	for _, t := range targets {
+		if t.Name == name {
+			return t, nil
+		}
+	}
+	return nil, fmt.Errorf("反映先 %q が見つかりません", name)
 }
 
 // stringList は clasp が文字列でも配列でも受け付ける項目を読む
@@ -466,9 +546,9 @@ func writeClaspConfig(file string, settings map[string]any) error {
 	return os.WriteFile(file, append(data, '\n'), 0o644)
 }
 
-// gasProject は今のリポジトリの、dir（GasProject の Dir）にある GAS のプロジェクトを読む。なければエラーにする。
+// gasProject は今のリポジトリの、dir（GasProject の Dir）にある GAS のプロジェクトの反映先を読む。なければエラーにする。
 // 返すリポジトリのパスは、clasp に渡せるようシンボリックリンクをたどった先にする
-func (a *App) gasProject(dir string) (string, *claspProject, error) {
+func (a *App) gasProject(dir string) (string, []*claspProject, error) {
 	if a.dir() == "" {
 		return "", nil, errNoRepository
 	}
@@ -480,16 +560,16 @@ func (a *App) gasProject(dir string) (string, *claspProject, error) {
 	if dir != "." && !(path.Dir(dir) == gasProjectsDir && gasProjectName.MatchString(path.Base(dir))) {
 		return "", nil, fmt.Errorf("GAS のプロジェクトの場所が正しくありません: %q", dir)
 	}
-	p, err := readClaspProject(repo, dir)
-	if err == nil && p == nil {
+	targets, err := gasTargets(repo, dir)
+	if err == nil && targets == nil {
 		err = fmt.Errorf("%s に .clasp.json がありません", dir)
 	}
-	return repo, p, err
+	return repo, targets, err
 }
 
-// claspConfig は clasp の --project に渡す .clasp.json のパス
+// claspConfig は clasp の --project に渡す、反映先の設定ファイルのパス
 func claspConfig(repo string, p *claspProject) string {
-	return filepath.Join(repo, filepath.FromSlash(p.Dir), ".clasp.json")
+	return filepath.Join(repo, filepath.FromSlash(p.Dir), claspFile(p.Name))
 }
 
 // GetGasProjects は今のリポジトリに紐づく GAS のプロジェクトを返す。直下のものを先に、あとは gas/ の下の名前順に並べる
@@ -505,25 +585,32 @@ func (a *App) GetGasProjects() ([]GasProject, error) {
 	}
 	c := loadConfig()
 	for _, p := range list {
-		projects = append(projects, gasProjectInfo(p, c))
+		targets, err := gasTargets(dir, p.Dir)
+		if err != nil {
+			return projects, err
+		}
+		project := GasProject{Dir: p.Dir, RootDir: p.RootDir, Targets: []GasTarget{}}
+		for _, t := range targets {
+			project.Targets = append(project.Targets, gasTargetInfo(t, c))
+		}
+		projects = append(projects, project)
 	}
 	return projects, nil
 }
 
-func gasProjectInfo(p *claspProject, c config) GasProject {
-	project := GasProject{
-		Dir:       p.Dir,
+func gasTargetInfo(p *claspProject, c config) GasTarget {
+	target := GasTarget{
+		Name:      p.Name,
 		ScriptID:  p.ScriptID,
-		RootDir:   p.RootDir,
 		EditorURL: "https://script.google.com/d/" + p.ScriptID + "/edit",
 	}
 	if p.ParentID != "" {
-		project.ContainerURL = "https://drive.google.com/open?id=" + url.QueryEscape(p.ParentID)
+		target.ContainerURL = "https://drive.google.com/open?id=" + url.QueryEscape(p.ParentID)
 	}
 	if rec, ok := c.GasSync[p.ScriptID]; ok {
-		project.LastSync = &rec.GasSync
+		target.LastSync = &rec.GasSync
 	}
-	return project
+	return target
 }
 
 // gasState は今のブランチとコミット（短いハッシュ）と、GAS のファイルにコミットしていない変更があるかを返す
@@ -557,32 +644,51 @@ func (a *App) saveGasSync(p *claspProject, snap gasSnapshot, action string) erro
 	})
 }
 
-// PrepareGasPush は GAS 側の今の中身を取ってきて、反映すると上書きされる変更がないかを調べる。まだ反映はしない
+// PrepareGasPush はすべての反映先の GAS 側の今の中身を取ってきて、反映すると上書きされる変更がないかを調べる。まだ反映はしない
 func (a *App) PrepareGasPush(project string) (GasPushPlan, error) {
-	plan := GasPushPlan{Overwritten: []string{}, Lost: []string{}}
-	dir, p, err := a.gasProject(project)
+	plan := GasPushPlan{Targets: []GasTargetPlan{}}
+	dir, targets, err := a.gasProject(project)
 	if err != nil {
 		return plan, err
 	}
-	remote, tmp, err := pullSnapshot(p)
-	os.RemoveAll(tmp)
+	primary := targets[0]
+	local, err := readSnapshot(filepath.Join(dir, filepath.FromSlash(primary.RootDir)), primary)
 	if err != nil {
 		return plan, err
 	}
-	local, err := readSnapshot(filepath.Join(dir, filepath.FromSlash(p.RootDir)), p)
-	if err != nil {
-		return plan, err
+	c := loadConfig()
+	// clasp は認証情報のファイルを書き換えることがあるので、同時には動かさない
+	for _, p := range targets {
+		remote, tmp, err := pullSnapshot(p)
+		os.RemoveAll(tmp)
+		if err != nil {
+			return plan, targetError(targets, p, err)
+		}
+		rec, synced := c.GasSync[p.ScriptID]
+		t := GasTargetPlan{Name: p.Name, Expected: remote.hash()}
+		t.Unchanged = t.Expected == local.hash()
+		t.Overwritten, t.Lost = overwrittenFiles(remote, local, rec, synced)
+		// 最初の取り込みは、そのあと作業用ブランチに移るのが普通なので、ブランチが変わったとは扱わない
+		if synced && rec.Action != "clone" {
+			t.LastBranch = rec.Branch
+		}
+		plan.Targets = append(plan.Targets, t)
 	}
-	rec, synced := loadConfig().GasSync[p.ScriptID]
-	plan.Expected = remote.hash()
-	plan.Unchanged = plan.Expected == local.hash()
-	plan.Overwritten, plan.Lost = overwrittenFiles(remote, local, rec, synced)
-	// 最初の取り込みは、そのあと作業用ブランチに移るのが普通なので、ブランチが変わったとは扱わない
-	if synced && rec.Action != "clone" {
-		plan.LastBranch = rec.Branch
-	}
-	plan.Branch, plan.Commit, plan.Dirty = a.gasState(p)
+	plan.Branch, plan.Commit, plan.Dirty = a.gasState(primary)
 	return plan, nil
+}
+
+// targetError は反映先が複数あるときに、どの反映先で失敗したかを書き添える
+func targetError(targets []*claspProject, p *claspProject, err error) error {
+	if len(targets) == 1 {
+		return err
+	}
+	return fmt.Errorf("反映先 %s: %w", targetLabel(p), err)
+}
+
+// targetLabel はエラーなどで見せる反映先の名前
+func targetLabel(p *claspProject) string {
+	return path.Join(p.Dir, claspFile(p.Name))
 }
 
 // overwrittenFiles は、反映すると上書きされる GAS 側だけの変更と、そのうち手元になくて消えるファイルを返す。
@@ -603,24 +709,59 @@ func overwrittenFiles(remote, local gasSnapshot, rec gasSyncRecord, synced bool)
 	return overwritten, lost
 }
 
-// PushGas は手元の GAS のファイルで GAS 側を置き換える。
-// GAS 側の中身が expected（PrepareGasPush で確かめたもの）から変わっていたら止める
-func (a *App) PushGas(project, expected string) error {
-	if !sha256Hex.MatchString(expected) {
-		return fmt.Errorf("確かめた GAS の中身が正しくありません: %q", expected)
+// PushGas は手元の GAS のファイルで、expected に挙げた反映先の GAS 側を置き換える。expected は反映先の名前から、
+// PrepareGasPush で確かめた GAS 側の中身のハッシュへ。どれか 1 つでもそこから変わっていたら、どこにも反映せずに止める
+func (a *App) PushGas(project string, expected map[string]string) error {
+	if len(expected) == 0 {
+		return fmt.Errorf("反映先を選んでください")
 	}
-	dir, p, err := a.gasProject(project)
+	for _, sum := range expected {
+		if !sha256Hex.MatchString(sum) {
+			return fmt.Errorf("確かめた GAS の中身が正しくありません: %q", sum)
+		}
+	}
+	dir, targets, err := a.gasProject(project)
 	if err != nil {
 		return err
 	}
-	remote, tmp, err := pullSnapshot(p)
-	os.RemoveAll(tmp)
-	if err != nil {
-		return err
+	for name := range expected {
+		if _, err := findTarget(targets, name); err != nil {
+			return err
+		}
 	}
-	if remote.hash() != expected {
-		return fmt.Errorf("確かめた後に GAS 側の中身が変わったので、反映せずに止めました。もう一度確かめてください")
+	// 並びは反映先の順にする
+	var pushing []*claspProject
+	for _, p := range targets {
+		if _, ok := expected[p.Name]; ok {
+			pushing = append(pushing, p)
+		}
 	}
+	for _, p := range pushing {
+		remote, tmp, err := pullSnapshot(p)
+		os.RemoveAll(tmp)
+		if err != nil {
+			return targetError(targets, p, err)
+		}
+		if remote.hash() != expected[p.Name] {
+			return targetError(targets, p, fmt.Errorf("確かめた後に GAS 側の中身が変わったので、反映せずに止めました。もう一度確かめてください"))
+		}
+	}
+	var done []string
+	for _, p := range pushing {
+		if err := a.pushGasTarget(dir, p); err != nil {
+			err = targetError(targets, p, err)
+			if len(done) > 0 {
+				return fmt.Errorf("%s には反映しましたが、ほかは反映していません。%w", strings.Join(done, "、"), err)
+			}
+			return err
+		}
+		done = append(done, targetLabel(p))
+	}
+	return nil
+}
+
+// pushGasTarget は手元の GAS のファイルで、反映先 p の GAS 側を置き換えて記録する
+func (a *App) pushGasTarget(dir string, p *claspProject) error {
 	// 確認は済ませているので、マニフェスト（appsscript.json）の上書きも聞かずに進める
 	if _, err := runClasp(filepath.Dir(claspConfig(dir, p)), "push", "--force", "--project", claspConfig(dir, p)); err != nil {
 		return err
@@ -637,10 +778,14 @@ func (a *App) PushGas(project, expected string) error {
 	return a.saveGasSync(p, after, "push")
 }
 
-// PullGas は GAS 側の今の中身を手元に取り込む。手元の GAS のファイルにコミットしていない変更があれば、上書きしないよう断る。
-// 取り込んだ差分は git の変更として見えるので、気に入らなければ戻せる
-func (a *App) PullGas(project string) error {
-	dir, p, err := a.gasProject(project)
+// PullGas は反映先 target の GAS 側の今の中身を手元に取り込む。手元の GAS のファイルにコミットしていない変更があれば、
+// 上書きしないよう断る。取り込んだ差分は git の変更として見えるので、気に入らなければ戻せる
+func (a *App) PullGas(project, target string) error {
+	dir, targets, err := a.gasProject(project)
+	if err != nil {
+		return err
+	}
+	p, err := findTarget(targets, target)
 	if err != nil {
 		return err
 	}
@@ -675,6 +820,68 @@ func (a *App) PullGas(project string) error {
 		}
 	}
 	return a.saveGasSync(p, remote, "pull")
+}
+
+// AddGasTarget は GAS のプロジェクト project に、貼られた URL の GAS を反映先 name として足す。
+// .clasp.json を写した .clasp.{name}.json を置くので、同じ GAS のファイルが送られる。
+// 足した反映先の中身は記録しないので、最初の反映では GAS 側にあるファイルが上書きされることを確認できる
+func (a *App) AddGasTarget(project, name, input string) error {
+	if !gasTargetName.MatchString(name) {
+		return fmt.Errorf("名前は英数字と _ - で付けてください（例: tokyo）: %q", name)
+	}
+	id, err := parseScriptID(input)
+	if err != nil {
+		return err
+	}
+	dir, targets, err := a.gasProject(project)
+	if err != nil {
+		return err
+	}
+	file := filepath.Join(dir, filepath.FromSlash(project), claspFile(name))
+	if fileExists(file) {
+		return fmt.Errorf("%s はもうあります。別の名前にしてください", path.Join(project, claspFile(name)))
+	}
+	for _, t := range targets {
+		if t.ScriptID == id {
+			return fmt.Errorf("この GAS はもう反映先にあります（%s）", targetLabel(t))
+		}
+	}
+	// 開ける GAS か、先に確かめる
+	p := *targets[0]
+	p.Name, p.ScriptID, p.ParentID = name, id, ""
+	_, tmp, err := pullSnapshot(&p)
+	os.RemoveAll(tmp)
+	if err != nil {
+		return err
+	}
+	// clasp のほかの設定もそろえるよう、.clasp.json をそのまま写す。紐づく先はドキュメントごとに違うので外す
+	data, err := os.ReadFile(claspConfig(dir, targets[0]))
+	if err != nil {
+		return err
+	}
+	var settings map[string]any
+	if err := json.Unmarshal(data, &settings); err != nil {
+		return err
+	}
+	settings["scriptId"] = id
+	delete(settings, "parentId")
+	return writeClaspConfig(file, settings)
+}
+
+// RemoveGasTarget は GAS のプロジェクト project から、足した反映先 name を外す。GAS 側はそのまま残る
+func (a *App) RemoveGasTarget(project, name string) error {
+	if name == "" {
+		return fmt.Errorf(".clasp.json の反映先は外せません")
+	}
+	dir, targets, err := a.gasProject(project)
+	if err != nil {
+		return err
+	}
+	p, err := findTarget(targets, name)
+	if err != nil {
+		return err
+	}
+	return os.Remove(claspConfig(dir, p))
 }
 
 // copyGasFile は取ってきた GAS のファイル src を root の下の rel に書く。シンボリックリンクの先には書かない
@@ -873,7 +1080,9 @@ func gasClaudeMd(dir string) string {
 - ` + "`../`" + ` のほかのフォルダーは別の GAS のプロジェクト。そこの関数は呼べない
 - Gmail やドライブなど新しいサービスを使うときは、appsscript.json の oauthScopes も見直す
 - 1 回の実行は 6 分までなど GAS には制限がある。スプレッドシートの読み書きは getValues / setValues でまとめて行う
-- ` + "`.clasp.json`" + ` のスクリプト ID は書き換えない
+- ` + "`.clasp.json`" + ` と ` + "`.clasp.{name}.json`" + ` のスクリプト ID は書き換えない
+- ` + "`.clasp.{name}.json`" + ` があれば、それぞれ別のドキュメントに紐づく GAS で、どれにも同じ ` + "`" + gasRootDir + "/`" + ` を反映する。
+  ドキュメントごとに変えたいことは、コードに直接書かず SpreadsheetApp.getActive() などで今のドキュメントから読む
 - ` + "`clasp push`" + ` や ` + "`clasp pull`" + `、デプロイなど GAS 側を変える操作は実行しない。GAS への反映は Hidume の画面から人が行う
 `
 }

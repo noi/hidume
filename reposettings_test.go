@@ -82,11 +82,12 @@ func TestCdWorkflowBranch(t *testing.T) {
 	if !strings.Contains(w, "secrets."+claspSecretName) {
 		t.Errorf("シークレットを使っていません:\n%s", w)
 	}
-	if !strings.Contains(w, "run: clasp push --force\n") {
+	if !strings.Contains(w, "for config in .clasp.json .clasp.*.json; do\n") {
 		t.Errorf("直下の GAS を反映していません:\n%s", w)
 	}
-	if w := cdWorkflow("main", "gas/report"); !strings.Contains(w, "run: clasp push --force --project gas/report/.clasp.json\n") {
-		t.Errorf("gas/report の GAS を反映していません:\n%s", w)
+	if w := cdWorkflow("main", "gas/report"); !strings.Contains(w, "for config in gas/report/.clasp.json gas/report/.clasp.*.json; do\n") ||
+		!strings.Contains(w, `clasp push --force --project "$config"`) {
+		t.Errorf("gas/report の反映先すべてに反映していません:\n%s", w)
 	}
 }
 

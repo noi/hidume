@@ -712,6 +712,18 @@
     margin-top: 10px;
 }
 
+/* 反映先が複数あるときの、反映先ごとの表示 */
+.gas-target {
+    margin-top: 12px;
+}
+
+.gas-target h3 {
+    margin: 0 0 4px;
+    color: rgba(255, 255, 255, 0.6);
+    font-size: 0.85rem;
+    font-weight: normal;
+}
+
 .chat-pane {
     display: flex;
     flex-direction: column;

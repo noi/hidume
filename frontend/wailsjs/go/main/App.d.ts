@@ -4,6 +4,8 @@ import {main} from '../models';
 
 export function AbortMerge():Promise<void>;
 
+export function AddGasTarget(arg1:string,arg2:string,arg3:string):Promise<void>;
+
 export function AddToGitignore(arg1:Array<string>):Promise<void>;
 
 export function AllowPublicRepository():Promise<boolean>;
@@ -92,13 +94,15 @@ export function PrepareForcePush():Promise<main.ForcePushPlan>;
 
 export function PrepareGasPush(arg1:string):Promise<main.GasPushPlan>;
 
-export function PullGas(arg1:string):Promise<void>;
+export function PullGas(arg1:string,arg2:string):Promise<void>;
 
 export function PullUpstream():Promise<void>;
 
 export function Push():Promise<void>;
 
-export function PushGas(arg1:string,arg2:string):Promise<void>;
+export function PushGas(arg1:string,arg2:Record<string, string>):Promise<void>;
+
+export function RemoveGasTarget(arg1:string,arg2:string):Promise<void>;
 
 export function RemoveWorktree():Promise<string>;
 
