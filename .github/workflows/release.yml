@@ -37,8 +37,9 @@ jobs:
           jq --arg v "$VERSION" '.info.productVersion = $v' wails.json > wails.json.tmp
           mv wails.json.tmp wails.json
 
+      # アプリが自分のバージョンを知って、アップデートがあるか確かめられるように埋め込む
       - name: Build
-        run: wails build -clean -platform darwin/universal
+        run: wails build -clean -platform darwin/universal -ldflags "-X main.version=${GITHUB_REF_NAME#v}"
 
       - name: Test
         run: go test ./...

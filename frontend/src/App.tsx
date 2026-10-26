@@ -5,6 +5,7 @@ import {
     AddToGitignore,
     AllowPublicRepository,
     ApplyRepoSetting,
+    CheckUpdate,
     Commit,
     ContinueMerge,
     ClearRepository,
@@ -40,6 +41,7 @@ import {
     PrepareGasPush,
     InitRepository,
     InstallTool,
+    InstallUpdate,
     ListWorktrees,
     MergeBase,
     OpenURL,
@@ -70,6 +72,8 @@ const COMMIT_LIMIT = 300;
 const PULL_REQUEST_POLL_MS = 90_000;
 // Go 側がリポジトリの変化を見つけたときに送ってくるイベント
 const REPO_CHANGED_EVENT = 'repo-changed';
+// メニューの「アップデートを確認」を押したときに Go 側が送ってくる
+const UPDATE_CHECK_EVENT = 'update-check';
 // 操作に反応したセリフを出しておく時間
 const SPEECH_MS = 4000;
 const ROW_HEIGHT = 28;
@@ -393,6 +397,8 @@ function App() {
     const [gasProjects, setGasProjects] = useState<main.GasProject[]>([]);
     const [gasFlow, setGasFlow] = useState<GasFlow | null>(null);
     const [settingsFlow, setSettingsFlow] = useState<SettingsFlow | null>(null);
+    // 新しいバージョンが出ているときの、アップデートするかの確認。「あとで」を押したら次に確かめるまで出さない
+    const [update, setUpdate] = useState<main.UpdateInfo | null>(null);
 
     useEffect(() => {
         if (!reaction) return;
@@ -451,6 +457,33 @@ function App() {
     }, [refreshLocal, loadPullRequest]);
 
     const onError = (e: unknown) => setError(String(e));
+
+    // manual はメニューから確かめたとき。最新でも、確かめられなかったときも、そう言う
+    const checkUpdate = (manual: boolean) => {
+        CheckUpdate()
+            .then((info) => {
+                if (info.available) setUpdate(info);
+                else if (manual) {
+                    setReaction(info.current
+                        ? `今の ${info.current} が最新だよ`
+                        : '手元でビルドした hidume なので、アップデートは確かめないよ');
+                }
+            })
+            .catch((e) => {
+                // 起動したときは、オフラインなどで確かめられなくても黙っておく
+                if (manual) onError(e);
+            });
+    };
+
+    // うまくいけば hidume が終わって起動し直すので、busy はそのままにする
+    const installUpdate = (info: main.UpdateInfo) => {
+        setUpdate(null);
+        setBusy(`${info.latest} をダウンロードしてるよ…`);
+        InstallUpdate().catch((e) => {
+            setBusy(null);
+            onError(e);
+        });
+    };
 
     const switchTo = (dir: string, message: string) => {
         setRepo(dir);
@@ -1631,6 +1664,13 @@ ${fence}
             {label: `${d.prefix}/${name || '…'} を作る`, onClick: () => createBranch(d), disabled: !name},
             {label: 'やめる', onClick: () => setBranchDraft(null)},
         ];
+    } else if (update) {
+        speech = `新しい hidume ${update.latest} が出てるよ（今は ${update.current}）。アップデートすると起動し直すよ。する？`;
+        actions = [
+            {label: 'アップデートする', onClick: () => installUpdate(update)},
+            {label: '変更点を見る', onClick: () => OpenURL(update.url).catch(onError)},
+            {label: 'あとで', onClick: () => setUpdate(null)},
+        ];
     } else if (reaction) {
         speech = reaction;
     } else if (error && isGasApiDisabled(error)) {
@@ -1685,6 +1725,12 @@ ${fence}
                 if (!status.done) setSetup({kind: 'app', step: 'hello', status, skipped: [], waiting: null, done: null});
             })
             .catch(onError);
+    }, []);
+
+    // 起動したときと、メニューから頼まれたときに、新しいバージョンが出ていないか確かめる
+    useEffect(() => {
+        checkUpdate(false);
+        return EventsOn(UPDATE_CHECK_EVENT, () => checkUpdate(true));
     }, []);
 
     // ターミナルでやっている間は、済んだかを定期的に確かめる

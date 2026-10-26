@@ -18,6 +18,10 @@ export function ApplyRepoSetting(arg1) {
   return window['go']['main']['App']['ApplyRepoSetting'](arg1);
 }
 
+export function CheckUpdate() {
+  return window['go']['main']['App']['CheckUpdate']();
+}
+
 export function ClearRepository() {
   return window['go']['main']['App']['ClearRepository']();
 }
@@ -152,6 +156,10 @@ export function InitRepository(arg1) {
 
 export function InstallTool(arg1) {
   return window['go']['main']['App']['InstallTool'](arg1);
+}
+
+export function InstallUpdate() {
+  return window['go']['main']['App']['InstallUpdate']();
 }
 
 export function ListWorktrees() {
