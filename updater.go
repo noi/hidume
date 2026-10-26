@@ -9,6 +9,7 @@ import (
 	goruntime "runtime"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
@@ -190,10 +191,12 @@ func appBundle() (string, error) {
 }
 
 // relaunch は、このプロセスが終わるのを待ってから bundle を開くシェルを起動する。
-// GUI アプリには端末がないので、このプロセスが終わってもシェルは止められずに残る
+// Finder などから開いたアプリは launchd のジョブで、終わると同じプロセスグループに残ったプロセスを launchd が止める。
+// シェルが巻き添えにならないよう、新しいセッション（別のプロセスグループ）で起動する
 func relaunch(bundle string) error {
 	script := `while kill -0 "$1" 2>/dev/null; do sleep 0.2; done; open "$2"`
 	cmd := exec.Command("/bin/sh", "-c", script, "sh", strconv.Itoa(os.Getpid()), bundle)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	if err := cmd.Start(); err != nil {
 		return err
 	}
