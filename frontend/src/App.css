@@ -507,8 +507,11 @@
     font-size: 0.85rem;
 }
 
+/* brew や npm の出力をそのまま出すと長いので、下のペインを潰さないよう 6 行ほどでスクロールさせる */
 .error > span {
     flex: 1;
+    max-height: 7.5em;
+    overflow-y: auto;
     white-space: pre-wrap;
     word-break: break-word;
 }
