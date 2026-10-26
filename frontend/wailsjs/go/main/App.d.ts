@@ -10,6 +10,8 @@ export function AllowPublicRepository():Promise<boolean>;
 
 export function ApplyRepoSetting(arg1:string):Promise<void>;
 
+export function CheckUpdate():Promise<main.UpdateInfo>;
+
 export function ClearRepository():Promise<void>;
 
 export function CloneGasScript(arg1:string,arg2:string):Promise<void>;
@@ -77,6 +79,8 @@ export function GetStatus():Promise<Array<main.StatusEntry>>;
 export function InitRepository(arg1:string):Promise<string>;
 
 export function InstallTool(arg1:string):Promise<void>;
+
+export function InstallUpdate():Promise<void>;
 
 export function ListWorktrees():Promise<Array<main.Worktree>>;
 
