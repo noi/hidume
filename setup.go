@@ -49,7 +49,7 @@ func addToolPaths() {
 		have[p] = true
 	}
 	var add []string
-	for _, p := range []string{filepath.Join(home, ".local", "bin"), "/opt/homebrew/bin", "/usr/local/bin"} {
+	for _, p := range []string{filepath.Join(home, ".local", "bin"), filepath.Join(nodeDir(), "bin"), "/opt/homebrew/bin", "/usr/local/bin"} {
 		if !have[p] {
 			add = append(add, p)
 		}
@@ -103,7 +103,7 @@ func (a *App) InstallTool(name string) error {
 		return openTerminalWith("claude", "auth", "login")
 	// ここからは GAS を始めるときの準備
 	case "node":
-		return runBrew("install", "node")
+		return installNode()
 	case "clasp":
 		return installClasp()
 	case "clasp-auth":
@@ -179,13 +179,14 @@ func runBrew(args ...string) error {
 }
 
 // openTerminalWith はターミナルで name を args 付きで実行する。
-// 入れたばかりの道具はターミナルのシェルの PATH にまだないことがあるので、見つけた場所で呼ぶ
+// 入れたばかりの道具はターミナルのシェルの PATH にまだないことがあるので、見つけた場所で呼ぶ。
+// clasp は #!/usr/bin/env node で node を探すので、PATH もこのアプリのものを渡す
 func openTerminalWith(name string, args ...string) error {
 	path, err := exec.LookPath(name)
 	if err != nil {
 		return fmt.Errorf("%s が見つかりません。先に入れてください", name)
 	}
-	words := []string{shellQuote(path)}
+	words := []string{"PATH=" + shellQuote(os.Getenv("PATH")), shellQuote(path)}
 	for _, arg := range args {
 		words = append(words, shellQuote(arg))
 	}

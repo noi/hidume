@@ -6,6 +6,7 @@ import (
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/options"
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
+	"github.com/wailsapp/wails/v2/pkg/options/mac"
 )
 
 //go:embed all:frontend/dist
@@ -30,7 +31,10 @@ func main() {
 			Assets: assets,
 		},
 		BackgroundColour: &options.RGBA{R: 27, G: 38, B: 54, A: 1},
-		OnStartup:        app.startup,
+		Menu:             app.applicationMenu(),
+		// Mac を指定しないと Wails はウィンドウの拡大ボタン（緑のボタン）を無効にする
+		Mac:       &mac.Options{},
+		OnStartup: app.startup,
 		Bind: []interface{}{
 			app,
 		},

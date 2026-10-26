@@ -3,6 +3,7 @@ import './App.css';
 import {
     AbortMerge,
     AddToGitignore,
+    AllowPublicRepository,
     ApplyRepoSetting,
     Commit,
     ContinueMerge,
@@ -118,6 +119,8 @@ type PushFlow =
     owner: string;
     user: string;
     owners: { value: string; label: string }[] | null;
+    // 「公開で作る」を出すか。メニューバーの「設定」で切り替える。うっかり公開しないよう、既定では出さない
+    allowPublic?: boolean;
     // 公開で作る前の、念押しの確認中か
     confirmPublic?: boolean;
 };
@@ -833,6 +836,9 @@ function App() {
         GetRepositoryName()
             .then((value) => setPushFlow((f) => f?.step === 'create' && f.value === initial ? {...f, value} : f))
             .catch(() => {});
+        AllowPublicRepository()
+            .then((allowPublic) => setPushFlow((f) => f?.step === 'create' ? {...f, allowPublic} : f))
+            .catch(() => {});
         GetGitHubOwners()
             .then(({user, orgs}) => {
                 const owners = [
@@ -1496,15 +1502,17 @@ ${fence}
             placeholder: 'リポジトリ名（⌘ + Enter で作る）',
             singleLine: true,
             onChange: (value) => setPushFlow({...flow, value}),
-            onSubmit: () => create(isOrg ? 'internal' : 'private'),
+            onSubmit: () => create('private'),
             onCancel: () => setPushFlow(null),
         }];
-        // Organization なら社内向けの Internal を先頭（既定）にする。個人には Internal がない
+        // 非公開を先頭（既定）にする。Organization なら社内向けの Internal も選べる。個人には Internal がない
         actions = [
-            ...(isOrg ? [{label: '組織限定公開で作る', onClick: () => create('internal'), disabled: !name}] : []),
             {label: '非公開で作る', onClick: () => create('private'), disabled: !name},
+            ...(isOrg ? [{label: '組織限定公開で作る', onClick: () => create('internal'), disabled: !name}] : []),
             // 公開はすぐには作らず、もう一段確認する
-            {label: '公開で作る', onClick: () => setPushFlow({...flow, confirmPublic: true}), disabled: !name},
+            ...(flow.allowPublic
+                ? [{label: '公開で作る', onClick: () => setPushFlow({...flow, confirmPublic: true}), disabled: !name}]
+                : []),
             {label: 'やめる', onClick: () => setPushFlow(null)},
         ];
     } else if (prDraft && !prDraft.bases) {

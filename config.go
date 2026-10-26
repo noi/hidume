@@ -19,6 +19,8 @@ type config struct {
 	SetupDone bool `json:"setupDone,omitempty"`
 	// Apps Script API を有効にしたと答えたか。API の状態は clasp で直接確かめられないので、答えを覚えておく
 	GasAPIEnabled bool `json:"gasApiEnabled,omitempty"`
+	// GitHub にリポジトリを作るとき「公開で作る」を出すか。うっかり公開しないよう、既定では出さない
+	AllowPublicRepository bool `json:"allowPublicRepository,omitempty"`
 	// スクリプト ID ごとの、最後に GAS と同期（反映・取り込み）したときの記録。
 	// ワークツリーがいくつあっても GAS 側は 1 つなので、リポジトリではなくスクリプトごとに持つ
 	GasSync map[string]gasSyncRecord `json:"gasSync,omitempty"`
