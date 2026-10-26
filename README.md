@@ -21,6 +21,7 @@ Go + [Wails v2](https://wails.io/) 製で、フロントエンドは React + Typ
   - GAS は開いているリポジトリの `gas/{project}/` に取り込むか新しく作る。1 つのリポジトリに複数置け、GAS のファイルは `gas/{project}/src/` に入る
   - リポジトリ直下に `.clasp.json` があるリポジトリも、そのまま扱える
 - 初回起動時のセットアップ（Homebrew・git・gh・Claude Code のインストールとログイン。macOS のみ）
+- アップデート（起動時と「設定」→「アップデートを確認…」で新しいリリースを確かめ、dmg を入れ替えて起動し直す）
 
 ## インストール
 
@@ -96,6 +97,10 @@ git push origin v0.1.0
 
 macOS 15 以降は、Finder で右クリックして「開く」を選んでも開けない。
 
+ビルドのときにタグのバージョンを `main.version` に埋め込み、アプリはそれと GitHub の最新リリース（プレリリースは除く）を
+比べてアップデートを知らせる。アップデートでは Release の dmg を GitHub が出すチェックサムで確かめてから、
+動いている `.app` を入れ替えて起動し直す。`make build` など手元のビルドはバージョンが空なので、アップデートを確かめない。
+
 ### テスト
 
 ```sh
@@ -116,6 +121,7 @@ go test ./...
 | `chat.go` / `commitmsg.go` / `prmsg.go` | Claude Code とのチャット、コミットメッセージと PR の文面の生成 |
 | `clasp.go` | Google Apps Script（clasp）との連携 |
 | `setup.go` | 初回のセットアップ |
+| `updater.go` | GitHub の Release からのアップデート |
 | `install.sh` | curl で最新リリースを入れるインストールスクリプト |
 | `config.go` / `history.go` | 設定と作業履歴の保存 |
 | `frontend/` | React + TypeScript のフロントエンド |

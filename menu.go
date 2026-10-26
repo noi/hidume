@@ -2,6 +2,7 @@ package main
 
 import (
 	"github.com/wailsapp/wails/v2/pkg/menu"
+	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 // applicationMenu はメニューバーのメニュー。
@@ -13,6 +14,11 @@ func (a *App) applicationMenu() *menu.Menu {
 		// チェックは Wails が切り替えてから呼ぶ
 		checked := data.MenuItem.Checked
 		_ = updateConfig(func(c *config) { c.AllowPublicRepository = checked })
+	})
+	settings.AddSeparator()
+	// 確かめた結果はヒヅメくんが言うので、フロントに任せる
+	settings.AddText("アップデートを確認…", nil, func(*menu.CallbackData) {
+		runtime.EventsEmit(a.ctx, updateCheckEvent)
 	})
 	return m
 }
