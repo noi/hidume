@@ -10,6 +10,10 @@ export function AddToGitignore(arg1) {
   return window['go']['main']['App']['AddToGitignore'](arg1);
 }
 
+export function AllowPublicRepository() {
+  return window['go']['main']['App']['AllowPublicRepository']();
+}
+
 export function ApplyRepoSetting(arg1) {
   return window['go']['main']['App']['ApplyRepoSetting'](arg1);
 }

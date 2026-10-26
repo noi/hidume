@@ -6,6 +6,8 @@ export function AbortMerge():Promise<void>;
 
 export function AddToGitignore(arg1:Array<string>):Promise<void>;
 
+export function AllowPublicRepository():Promise<boolean>;
+
 export function ApplyRepoSetting(arg1:string):Promise<void>;
 
 export function ClearRepository():Promise<void>;

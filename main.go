@@ -31,6 +31,7 @@ func main() {
 			Assets: assets,
 		},
 		BackgroundColour: &options.RGBA{R: 27, G: 38, B: 54, A: 1},
+		Menu:             app.applicationMenu(),
 		// Mac を指定しないと Wails はウィンドウの拡大ボタン（緑のボタン）を無効にする
 		Mac:       &mac.Options{},
 		OnStartup: app.startup,
