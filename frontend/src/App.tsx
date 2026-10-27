@@ -19,6 +19,7 @@ import {
     CreateGasScript,
     CreateInitialCommit,
     CreateGitHubRepository,
+    ClosePullRequest,
     CreatePullRequest,
     FetchRemote,
     ForcePush,
@@ -33,6 +34,7 @@ import {
     GetMergeStatus,
     GetPullRequest,
     GetPullRequestDefaults,
+    MergePullRequest,
     GetPushStatus,
     GetRepoSettings,
     GetRepository,
@@ -164,6 +166,15 @@ type PullRequestState = {
     loading: boolean;
     value: main.PullRequest | null;
     error: string;
+};
+
+// マージかクローズを確認しているところ
+type PullRequestAction = { kind: 'merge'; method: string } | { kind: 'close' };
+
+const MERGE_METHODS: Record<string, { label: string; description: string }> = {
+    merge: {label: 'マージコミットでマージ', description: 'コミットをすべて残し、マージコミットを作る'},
+    squash: {label: 'スカッシュしてマージ', description: 'コミットを 1 つにまとめてマージする'},
+    rebase: {label: 'リベースしてマージ', description: 'コミットをベースブランチの先に並べ直す'},
 };
 
 const AUTO_CLAUDE_KEY = 'hidume.autoClaude';
@@ -404,6 +415,7 @@ function App() {
     const [pushFlow, setPushFlow] = useState<PushFlow | null>(null);
     const [pullRequest, setPullRequest] = useState<PullRequestState>({loading: true, value: null, error: ''});
     const [prDraft, setPrDraft] = useState<PullRequestDraft | null>(null);
+    const [prAction, setPrAction] = useState<PullRequestAction | null>(null);
     const [branchDraft, setBranchDraft] = useState<BranchDraft | null>(null);
     const [mergeStatus, setMergeStatus] = useState<main.MergeStatus | null>(null);
     // ベースブランチを取り込むか確認しているところか
@@ -988,6 +1000,25 @@ function App() {
         // 下書き（Draft）の PR は、エンジニアでない人には違いがわかりにくいので作らない
         CreatePullRequest(d.base, title, d.body.trim(), false)
             .then(() => setReaction('PR を作ったよ！'))
+            .catch(onError)
+            .finally(() => {
+                setBusy(null);
+                refresh();
+            });
+    };
+
+    // 確認したときに見ていた PR をマージ・クローズする。確認の間に別の PR に変わっていたらやめる
+    const runPullRequestAction = (action: PullRequestAction, pr: main.PullRequest) => {
+        setPrAction(null);
+        if (pullRequest.value?.number !== pr.number || pr.state !== 'OPEN') return;
+        const merging = action.kind === 'merge';
+        setBusy(merging ? `PR #${pr.number} をマージしてるよ…` : `PR #${pr.number} をクローズしてるよ…`);
+        (merging ? MergePullRequest(pr.number, action.method, pr.headRefOid) : ClosePullRequest(pr.number))
+            .then(() => {
+                setReaction(merging ? `PR #${pr.number} をマージしたよ！` : `PR #${pr.number} をクローズしたよ`);
+                // マージ先に入ったコミットを、取り込みの表示に反映する
+                if (merging) return FetchRemote().catch(() => undefined);
+            })
             .catch(onError)
             .finally(() => {
                 setBusy(null);
@@ -1596,6 +1627,26 @@ ${fence}
             {label: '取り込む', onClick: () => runMerge()},
             {label: 'やめる', onClick: () => setConfirmingMerge(false)},
         ];
+    } else if (prAction && pullRequest.value?.state === 'OPEN') {
+        const pr = pullRequest.value;
+        const action = prAction;
+        if (action.kind === 'merge') {
+            const failed = pr.checks.filter((c) => c.state === 'fail').length;
+            const pending = pr.checks.filter((c) => c.state === 'pending').length;
+            const checkNote = failed > 0 ? `Checks が ${failed} 件失敗してるけど、`
+                : pending > 0 ? 'Checks がまだ終わってないけど、' : '';
+            speech = `PR #${pr.number}「${pr.title}」を${MERGE_METHODS[action.method]?.label ?? action.method}するよ。${checkNote}いい？`;
+            actions = [
+                {label: 'マージする', onClick: () => runPullRequestAction(action, pr)},
+                {label: 'やめる', onClick: () => setPrAction(null)},
+            ];
+        } else {
+            speech = `PR #${pr.number}「${pr.title}」をマージせずにクローズするよ。ブランチはそのまま残るけど、いい？`;
+            actions = [
+                {label: 'クローズする', danger: true, onClick: () => runPullRequestAction(action, pr)},
+                {label: 'やめる', onClick: () => setPrAction(null)},
+            ];
+        }
     } else if (pushFlow?.step === 'confirm' && pushStatus && diverged) {
         speech = `手元と ${pushStatus.upstream} の履歴が分かれてるよ（手元だけ ${pushStatus.ahead} 件、`
             + `リモートだけ ${pushStatus.behind} 件）。普通のプッシュは断られちゃう。フォースプッシュする？`;
@@ -1990,6 +2041,8 @@ ${fence}
             <main className="panes">
                 <RemotePane push={pushStatus} merge={mergeStatus} pullRequest={pullRequest} busy={busy !== null}
                             onCreatePullRequest={startPullRequest}
+                            onMerge={(method) => setPrAction({kind: 'merge', method})}
+                            onClosePullRequest={() => setPrAction({kind: 'close'})}
                             onSettings={repo ? () => openSettings() : undefined}
                             onOpen={(url) => OpenURL(url).catch(onError)}>
                     {gasProjects.map((project) => (
@@ -2323,12 +2376,17 @@ function HistoryMenu({disabled, onSwitch, onError}: {
 const PR_STATE_LABELS: Record<string, string> = {OPEN: 'オープン', MERGED: 'マージ済み', CLOSED: 'クローズ'};
 
 // 右上: ローカルの最新が push 済みかと、今のブランチの PR
-function RemotePane({push, merge, pullRequest, busy, onCreatePullRequest, onSettings, onOpen, children}: {
+function RemotePane({
+                        push, merge, pullRequest, busy, onCreatePullRequest, onMerge, onClosePullRequest, onSettings, onOpen,
+                        children,
+                    }: {
     push: main.PushStatus | null;
     merge: main.MergeStatus | null;
     pullRequest: PullRequestState;
     busy: boolean;
     onCreatePullRequest: () => void;
+    onMerge: (method: string) => void;
+    onClosePullRequest: () => void;
     // おすすめのリポジトリ設定を開く。リポジトリを開いていなければ出さない
     onSettings?: () => void;
     onOpen: (url: string) => void;
@@ -2427,8 +2485,105 @@ function RemotePane({push, merge, pullRequest, busy, onCreatePullRequest, onSett
                     )}
                 </div>
             )}
+            {!isDefault && pr?.state === 'OPEN' && (
+                <>
+                    <ChecksLine checks={pr.checks} onOpen={onOpen}/>
+                    <div className="pr-actions">
+                        <MergeButton pr={pr} busy={busy} onMerge={onMerge}/>
+                        <button className="pr-create" disabled={busy} onClick={onClosePullRequest}
+                                title="マージせずに PR をクローズする">クローズ</button>
+                    </div>
+                </>
+            )}
             {children}
         </section>
+    );
+}
+
+const CHECK_ICONS: Record<string, string> = {pass: '✓', fail: '✕', pending: '●', skip: '–'};
+
+// PR の Checks のまとめ。押すと 1 件ずつの状態を開き、名前を押すと詳細のページを開く
+function ChecksLine({checks, onOpen}: { checks: main.Check[]; onOpen: (url: string) => void }) {
+    if (checks.length === 0) return null;
+    const count = (state: string) => checks.filter((c) => c.state === state).length;
+    const failed = count('fail');
+    const pending = count('pending');
+    const summary = failed > 0 ? {state: 'fail', text: `Checks が ${failed} 件失敗しています`}
+        : pending > 0 ? {state: 'pending', text: `Checks を実行中です（${checks.length - pending}/${checks.length} 件完了）`}
+            : {state: 'pass', text: `Checks はすべて通っています（${checks.length} 件）`};
+    return (
+        <details className="checks">
+            <summary className={`check-${summary.state}`}>{CHECK_ICONS[summary.state]} {summary.text}</summary>
+            <ul>
+                {checks.map((c, i) => (
+                    <li key={`${c.name}-${i}`} className={`check-${c.state}`}>
+                        <span className="check-icon">{CHECK_ICONS[c.state]}</span>
+                        {c.url.startsWith('https://')
+                            ? <button className="check-name" title={c.url} onClick={() => onOpen(c.url)}>{c.name}</button>
+                            : <span className="check-name">{c.name}</span>}
+                    </li>
+                ))}
+            </ul>
+        </details>
+    );
+}
+
+// マージのボタン。右の ▾ でリポジトリの設定で選べる種別から選び、左を押すとその種別でマージする
+function MergeButton({pr, busy, onMerge}: {
+    pr: main.PullRequest;
+    busy: boolean;
+    onMerge: (method: string) => void;
+}) {
+    const [picked, setPicked] = useState('');
+    const [open, setOpen] = useState(false);
+    const ref = useRef<HTMLDivElement>(null);
+
+    // メニューの外を押したら閉じる
+    useEffect(() => {
+        if (!open) return;
+        const close = (e: MouseEvent) => {
+            if (!ref.current?.contains(e.target as Node)) setOpen(false);
+        };
+        document.addEventListener('mousedown', close);
+        return () => document.removeEventListener('mousedown', close);
+    }, [open]);
+
+    const methods = pr.mergeMethods;
+    // 選んだ種別がリポジトリの設定で選べなくなったら、既定に戻す
+    const method = methods.includes(picked) ? picked
+        : methods.includes(pr.defaultMergeMethod) ? pr.defaultMergeMethod : methods[0] ?? '';
+    const blocked = pr.isDraft || pr.mergeStateStatus === 'DRAFT' ? '下書きの PR はマージできません'
+        : pr.mergeable === 'CONFLICTING' || pr.mergeStateStatus === 'DIRTY' ? '先にコンフリクトを解消してね'
+            : pr.mergeStateStatus === 'BEHIND' ? 'ベースブランチの最新を取り込んでからマージしてね'
+                : pr.mergeStateStatus === 'BLOCKED' ? '必要な Checks やレビューが済んでいないので、まだマージできません'
+                    : methods.length === 0 ? 'リポジトリで選べるマージの種別を確認できませんでした' : '';
+
+    return (
+        <div className={`merge-group${blocked || busy ? ' merge-disabled' : ''}`} ref={ref}>
+            <button className="merge-main" disabled={!!blocked || busy} onClick={() => onMerge(method)}
+                    title={blocked || MERGE_METHODS[method]?.description}>
+                {MERGE_METHODS[method]?.label ?? 'マージ'}
+            </button>
+            {methods.length > 1 && (
+                <button className="merge-caret" disabled={!!blocked || busy} onClick={() => setOpen(!open)}
+                        title="マージの種別を選ぶ">▾</button>
+            )}
+            {open && !blocked && !busy && (
+                <ul className="worktree-list merge-list">
+                    {methods.map((m) => (
+                        <li key={m}>
+                            <button className={m === method ? 'current' : undefined} onClick={() => {
+                                setPicked(m);
+                                setOpen(false);
+                            }}>
+                                <span className="worktree-branch">{m === method ? '✓ ' : ''}{MERGE_METHODS[m]?.label ?? m}</span>
+                                <span className="worktree-path">{MERGE_METHODS[m]?.description}</span>
+                            </button>
+                        </li>
+                    ))}
+                </ul>
+            )}
+        </div>
     );
 }
 

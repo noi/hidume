@@ -1111,3 +1111,113 @@
     background-color: rgba(255, 241, 118, 0.2);
     color: #fff176;
 }
+
+/* PR の Checks。まとめの行を押すと 1 件ずつの状態を開く */
+.checks {
+    margin-top: 8px;
+    font-size: 0.85rem;
+}
+
+.checks summary {
+    cursor: pointer;
+}
+
+.checks ul {
+    margin: 4px 0 0;
+    padding-left: 18px;
+    list-style: none;
+}
+
+.checks li {
+    display: flex;
+    gap: 6px;
+    padding: 1px 0;
+}
+
+.check-pass { color: #81c784; }
+.check-fail { color: #e57373; }
+.check-pending { color: #ffb74d; }
+.check-skip { color: rgba(255, 255, 255, 0.5); }
+
+/* 名前は色を付けず、状態は印の色で見せる */
+.check-name {
+    min-width: 0;
+    overflow: hidden;
+    padding: 0;
+    border: none;
+    background: none;
+    color: rgba(255, 255, 255, 0.85);
+    font: inherit;
+    text-align: left;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+button.check-name {
+    cursor: pointer;
+}
+
+button.check-name:hover {
+    text-decoration: underline;
+}
+
+.pr-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 10px;
+}
+
+/* マージのボタンと種別を選ぶ ▾ は、1 つのボタンに見えるようにまとめる */
+.merge-group {
+    position: relative;
+    display: flex;
+    border-radius: 4px;
+    background-color: #2e7d32;
+}
+
+.merge-group.merge-disabled {
+    background-color: rgba(255, 255, 255, 0.12);
+}
+
+.merge-main,
+.merge-caret {
+    padding: 4px 12px;
+    border: none;
+    background: none;
+    color: white;
+    cursor: pointer;
+}
+
+.merge-main {
+    border-radius: 4px 0 0 4px;
+}
+
+.merge-main:only-child {
+    border-radius: 4px;
+}
+
+/* マージのボタンとの間に区切り線を引く */
+.merge-caret {
+    padding: 4px 8px;
+    border-left: 1px solid rgba(255, 255, 255, 0.25);
+    border-radius: 0 4px 4px 0;
+}
+
+.merge-main:hover:not(:disabled),
+.merge-caret:hover:not(:disabled) {
+    background-color: rgba(255, 255, 255, 0.15);
+}
+
+.merge-main:disabled,
+.merge-caret:disabled {
+    color: rgba(255, 255, 255, 0.3);
+    cursor: default;
+}
+
+/* 種別の一覧は、マージのボタンの左端にそろえて開く */
+.merge-list {
+    right: auto;
+    left: 0;
+    width: 300px;
+}

@@ -38,6 +38,10 @@ export function CloneRepository(arg1, arg2) {
   return window['go']['main']['App']['CloneRepository'](arg1, arg2);
 }
 
+export function ClosePullRequest(arg1) {
+  return window['go']['main']['App']['ClosePullRequest'](arg1);
+}
+
 export function Commit(arg1) {
   return window['go']['main']['App']['Commit'](arg1);
 }
@@ -180,6 +184,10 @@ export function ListWorktrees() {
 
 export function MergeBase() {
   return window['go']['main']['App']['MergeBase']();
+}
+
+export function MergePullRequest(arg1, arg2, arg3) {
+  return window['go']['main']['App']['MergePullRequest'](arg1, arg2, arg3);
 }
 
 export function OpenURL(arg1) {
