@@ -18,6 +18,8 @@ export function ClearRepository():Promise<void>;
 
 export function CloneGasScript(arg1:string,arg2:string):Promise<void>;
 
+export function CloneRepository(arg1:string,arg2:string):Promise<string>;
+
 export function Commit(arg1:string):Promise<void>;
 
 export function CommitAll(arg1:string):Promise<void>;
@@ -84,6 +86,8 @@ export function InstallTool(arg1:string):Promise<void>;
 
 export function InstallUpdate():Promise<void>;
 
+export function ListOwnedRepositories():Promise<Array<main.GitHubRepository>>;
+
 export function ListWorktrees():Promise<Array<main.Worktree>>;
 
 export function MergeBase():Promise<boolean>;
@@ -107,6 +111,8 @@ export function RemoveGasTarget(arg1:string,arg2:string):Promise<void>;
 export function RemoveWorktree():Promise<string>;
 
 export function RevertTo(arg1:string):Promise<void>;
+
+export function SelectCloneDirectory():Promise<string>;
 
 export function SelectRepository():Promise<main.RepoSelection>;
 

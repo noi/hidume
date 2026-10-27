@@ -259,6 +259,22 @@ export namespace main {
 	        this.orgs = source["orgs"];
 	    }
 	}
+	export class GitHubRepository {
+	    nameWithOwner: string;
+	    url: string;
+	    isPrivate: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new GitHubRepository(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.nameWithOwner = source["nameWithOwner"];
+	        this.url = source["url"];
+	        this.isPrivate = source["isPrivate"];
+	    }
+	}
 	export class HistoryEntry {
 	    path: string;
 	    repo: string;
