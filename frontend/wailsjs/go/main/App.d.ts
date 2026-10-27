@@ -20,6 +20,8 @@ export function CloneGasScript(arg1:string,arg2:string):Promise<void>;
 
 export function CloneRepository(arg1:string,arg2:string):Promise<string>;
 
+export function ClosePullRequest(arg1:number):Promise<void>;
+
 export function Commit(arg1:string):Promise<void>;
 
 export function CommitAll(arg1:string):Promise<void>;
@@ -91,6 +93,8 @@ export function ListOwnedRepositories():Promise<Array<main.GitHubRepository>>;
 export function ListWorktrees():Promise<Array<main.Worktree>>;
 
 export function MergeBase():Promise<boolean>;
+
+export function MergePullRequest(arg1:number,arg2:string,arg3:string):Promise<void>;
 
 export function OpenURL(arg1:string):Promise<void>;
 
