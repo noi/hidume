@@ -972,10 +972,9 @@ function App() {
 
     const startPush = () => setPushFlow(pushStatus?.hasOrigin ? {step: 'confirm'} : {step: 'noOrigin'});
 
-    const canPush = !!pushStatus?.branch && commits.length > 0 && !busy
-        && !(pushStatus.upstream && pushStatus.ahead === 0);
+    const canPush = !!pushStatus?.branch && commits.length > 0 && !busy && pushStatus.ahead > 0;
     const pushTitle = !pushStatus?.branch ? 'ブランチにいないのでプッシュできません'
-        : pushStatus.upstream && pushStatus.ahead === 0 ? 'プッシュするコミットはありません'
+        : pushStatus.ahead === 0 ? 'プッシュするコミットはありません'
             : 'プッシュする';
 
     const base = mergeStatus?.base ?? '';
@@ -1112,7 +1111,7 @@ ${fence}
                 actions: [{label: 'フォースプッシュを考える', onClick: () => startForcePush(false)}],
             };
         }
-        if (!pushStatus.upstream || pushStatus.ahead > 0) {
+        if (pushStatus.ahead > 0) {
             return {
                 text: pushStatus.upstream
                     ? `まだプッシュしてないコミットが ${pushStatus.ahead} 件あるよ。プッシュする？`

@@ -28,7 +28,7 @@ type PushStatus struct {
 	HasOrigin bool   `json:"hasOrigin"`
 	// 追跡しているリモートブランチ（例: origin/main）。まだないときは空
 	Upstream string `json:"upstream"`
-	// push されていないコミットの数。Upstream がないときはブランチの全コミット数
+	// push されていないコミットの数。Upstream がないときは、どのリモート追跡ブランチからも辿れないコミットの数
 	Ahead int `json:"ahead"`
 	// Upstream にあって、まだ取り込んでいないコミットの数（最後に fetch した時点）
 	Behind int `json:"behind"`
@@ -60,7 +60,8 @@ func (a *App) GetPushStatus() PushStatus {
 		return s
 	}
 	if s.Upstream == "" {
-		s.Ahead = a.countCommits("HEAD")
+		// main から作ったばかりでまだコミットしていないブランチは、送るものがないので 0 になる
+		s.Ahead = a.countCommits("HEAD", "--not", "--remotes")
 		return s
 	}
 	s.Ahead = a.countCommits("@{upstream}..HEAD")
@@ -91,8 +92,8 @@ func webURL(remote string) string {
 	return (&url.URL{Scheme: "https", Host: host, Path: "/" + repoPath}).String()
 }
 
-func (a *App) countCommits(rng string) int {
-	out, err := a.runGit("rev-list", "--count", rng)
+func (a *App) countCommits(rng ...string) int {
+	out, err := a.runGit(append([]string{"rev-list", "--count"}, rng...)...)
 	if err != nil {
 		return 0
 	}
