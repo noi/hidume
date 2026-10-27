@@ -11,6 +11,7 @@ import {
     ContinueMerge,
     ClearRepository,
     CloneGasScript,
+    CloneRepository,
     CommitAll,
     CompleteSetup,
     ConfirmGasAPI,
@@ -43,6 +44,7 @@ import {
     InitRepository,
     InstallTool,
     InstallUpdate,
+    ListOwnedRepositories,
     ListWorktrees,
     MergeBase,
     OpenURL,
@@ -53,6 +55,7 @@ import {
     RemoveGasTarget,
     RemoveWorktree,
     RevertTo,
+    SelectCloneDirectory,
     SelectRepository,
     SendChat,
     SetOrigin,
@@ -130,6 +133,13 @@ type PushFlow =
     // 公開で作る前の、念押しの確認中か
     confirmPublic?: boolean;
 };
+
+// リポジトリの開き方（手元のフォルダーか clone か）を選ぶところと、clone の流れ
+type CloneFlow =
+    | { step: 'menu' }
+    | { step: 'url'; url: string }
+    // repos は自分がオーナーのリポジトリ。取得中は null。filter で絞り込み、picked（URL）を clone する
+    | { step: 'owned'; repos: main.GitHubRepository[] | null; filter: string; picked: string };
 
 // 作業用ブランチを作るときの入力。prefix（{user_id}）は取得中は null
 type BranchDraft = {
@@ -379,6 +389,7 @@ function App() {
     const [reaction, setReaction] = useState<string | null>(null);
     // git init するか聞いているディレクトリ
     const [initDir, setInitDir] = useState<string | null>(null);
+    const [cloneFlow, setCloneFlow] = useState<CloneFlow | null>(null);
     const [draft, setDraft] = useState<CommitDraft | null>(null);
     const [secretCheck, setSecretCheck] = useState<SecretCheck | null>(null);
     const [autoClaude, setAutoClaude] = useState(loadAutoClaude);
@@ -504,6 +515,7 @@ function App() {
         setSecretCheck(null);
         setGasFlow(null);
         setSettingsFlow(null);
+        setCloneFlow(null);
         setReaction(message);
         refresh();
     };
@@ -513,6 +525,30 @@ function App() {
             .then(({repo: dir, needsInit}) => {
                 setInitDir(needsInit || null);
                 if (!needsInit && dir !== repo) switchTo(dir, `${baseName(dir)} を開いたよ`);
+            })
+            .catch(onError);
+    };
+
+    const startOwnedClone = () => {
+        setCloneFlow({step: 'owned', repos: null, filter: '', picked: ''});
+        ListOwnedRepositories()
+            .then((repos) => setCloneFlow((f) => f?.step === 'owned' ? {...f, repos} : f))
+            .catch((e) => {
+                setCloneFlow(null);
+                onError(e);
+            });
+    };
+
+    // clone 先のフォルダーを選んでもらってから clone する。選ぶのをやめたら、URL やリポジトリを選び直せるよう流れはそのままにする
+    const runClone = (url: string) => {
+        SelectCloneDirectory()
+            .then((parent) => {
+                if (!parent) return;
+                setCloneFlow(null);
+                setBusy('clone してるよ…（大きなリポジトリだと数分かかることもあるよ）');
+                return CloneRepository(url, parent)
+                    .then((root) => switchTo(root, `${baseName(root)} を clone したよ！`))
+                    .finally(() => setBusy(null));
             })
             .catch(onError);
     };
@@ -1247,6 +1283,70 @@ ${fence}
         ];
     } else if (busy) {
         speech = busy;
+    } else if (cloneFlow?.step === 'menu') {
+        speech = 'どのリポジトリを開く？ 手元のフォルダーを選ぶか、GitHub などから clone してね';
+        actions = [
+            {
+                label: 'フォルダーを選ぶ', onClick: () => {
+                    setCloneFlow(null);
+                    selectRepository();
+                },
+            },
+            {label: 'URL から clone', onClick: () => setCloneFlow({step: 'url', url: ''})},
+            {label: '自分のリポジトリから clone', onClick: startOwnedClone},
+            {label: 'やめる', onClick: () => setCloneFlow(null)},
+        ];
+    } else if (cloneFlow?.step === 'url') {
+        const flow = cloneFlow;
+        const url = flow.url.trim();
+        const submit = () => url && runClone(url);
+        speech = 'clone するリポジトリの URL を教えて。そのあと、どのフォルダーの中に置くか選んでね';
+        inputs = [{
+            value: flow.url,
+            placeholder: 'https://github.com/owner/repo（⌘ + Enter で次へ）',
+            singleLine: true,
+            onChange: (url) => setCloneFlow({...flow, url}),
+            onSubmit: submit,
+            onCancel: () => setCloneFlow(null),
+        }];
+        actions = [
+            {label: '次へ', onClick: submit, disabled: !url},
+            {label: '戻る', onClick: () => setCloneFlow({step: 'menu'})},
+        ];
+    } else if (cloneFlow?.step === 'owned' && !cloneFlow.repos) {
+        speech = 'GitHub のきみのリポジトリを調べてるよ…';
+        actions = [{label: 'やめる', onClick: () => setCloneFlow(null)}];
+    } else if (cloneFlow?.step === 'owned' && cloneFlow.repos!.length === 0) {
+        speech = 'きみがオーナーのリポジトリは GitHub にまだないみたい';
+        actions = [{label: '戻る', onClick: () => setCloneFlow({step: 'menu'})}];
+    } else if (cloneFlow?.step === 'owned') {
+        const flow = cloneFlow;
+        const filter = flow.filter.trim().toLowerCase();
+        const shown = flow.repos!.filter((r) => r.nameWithOwner.toLowerCase().includes(filter));
+        // 絞り込みで選んでいたものが外れたら、残ったものの先頭を選ぶ
+        const picked = shown.find((r) => r.url === flow.picked) ?? shown[0];
+        const submit = () => picked && runClone(picked.url);
+        speech = shown.length > 0
+            ? 'どのリポジトリを clone する？ 名前で絞り込めるよ。そのあと、どのフォルダーの中に置くか選んでね'
+            : `「${flow.filter.trim()}」が名前に入ったリポジトリはないよ`;
+        select = {
+            label: 'リポジトリ',
+            value: picked?.url ?? '',
+            options: shown.map((r) => ({value: r.url, label: r.isPrivate ? `${r.nameWithOwner}（非公開）` : r.nameWithOwner})),
+            onChange: (picked) => setCloneFlow({...flow, picked}),
+        };
+        inputs = [{
+            value: flow.filter,
+            placeholder: '名前で絞り込む（⌘ + Enter で次へ）',
+            singleLine: true,
+            onChange: (filter) => setCloneFlow({...flow, filter}),
+            onSubmit: submit,
+            onCancel: () => setCloneFlow(null),
+        }];
+        actions = [
+            {label: '次へ', onClick: submit, disabled: !picked},
+            {label: '戻る', onClick: () => setCloneFlow({step: 'menu'})},
+        ];
     } else if (gasFlow?.step === 'menu') {
         speech = 'GAS（Apps Script）のプロジェクトを、このリポジトリの gas フォルダーに用意しよう。'
             + '今あるスクリプトを取り込む？ それとも新しく作る？';
@@ -1838,6 +1938,7 @@ ${fence}
                 <Mascot speech={speech} actions={actions} inputs={inputs} options={options} select={select} list={list} sad={sad}
                         loading={busy !== null || (draft !== null && generating)
                             || (pushFlow?.step === 'create' && !pushFlow.owners)
+                            || (cloneFlow?.step === 'owned' && !cloneFlow.repos)
                             || (pushFlow?.step === 'force' && !pushFlow.plan)
                             || (gasFlow?.step === 'push' && !gasFlow.plan)
                             || (settingsFlow?.step === 'menu' && !settingsFlow.settings)
@@ -1848,7 +1949,8 @@ ${fence}
                     <div className="header-buttons">
                         {/* リポジトリの選択とクリアは、1 つのボタンに見えるようにまとめる */}
                         <div className="repo-group">
-                            <button className="repo" title={repo ?? undefined} onClick={selectRepository}>
+                            <button className="repo" title={repo ?? undefined} disabled={busy !== null}
+                                    onClick={() => setCloneFlow({step: 'menu'})}>
                                 {repo ? repo.split('/').pop() : 'リポジトリを選択'}
                             </button>
                             {repo && (

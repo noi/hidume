@@ -34,6 +34,10 @@ export function CloneGasScript(arg1, arg2) {
   return window['go']['main']['App']['CloneGasScript'](arg1, arg2);
 }
 
+export function CloneRepository(arg1, arg2) {
+  return window['go']['main']['App']['CloneRepository'](arg1, arg2);
+}
+
 export function Commit(arg1) {
   return window['go']['main']['App']['Commit'](arg1);
 }
@@ -166,6 +170,10 @@ export function InstallUpdate() {
   return window['go']['main']['App']['InstallUpdate']();
 }
 
+export function ListOwnedRepositories() {
+  return window['go']['main']['App']['ListOwnedRepositories']();
+}
+
 export function ListWorktrees() {
   return window['go']['main']['App']['ListWorktrees']();
 }
@@ -212,6 +220,10 @@ export function RemoveWorktree() {
 
 export function RevertTo(arg1) {
   return window['go']['main']['App']['RevertTo'](arg1);
+}
+
+export function SelectCloneDirectory() {
+  return window['go']['main']['App']['SelectCloneDirectory']();
 }
 
 export function SelectRepository() {

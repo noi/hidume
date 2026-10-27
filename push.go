@@ -269,13 +269,18 @@ func (a *App) runNetwork(name string, args ...string) (string, error) {
 
 // runNetworkInput は runNetwork と同じく実行し、input を標準入力に渡す。秘密の値を引数に載せずに渡すときに使う
 func (a *App) runNetworkInput(input string, name string, args ...string) (string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), networkTimeout)
-	defer cancel()
-
 	dir := a.dir()
 	if dir == "" {
 		return "", errNoRepository
 	}
+	return runNetworkIn(dir, networkTimeout, input, name, args...)
+}
+
+// runNetworkIn はネットワークを使うコマンドを dir で実行する。リポジトリを開いていなくても使える
+func runNetworkIn(dir string, timeout time.Duration, input string, name string, args ...string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
 	var stdout, stderr bytes.Buffer
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Dir = dir
@@ -285,7 +290,7 @@ func (a *App) runNetworkInput(input string, name string, args ...string) (string
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
 		if ctx.Err() != nil {
-			return "", fmt.Errorf("%s が %s 以内に終わりませんでした", name, networkTimeout)
+			return "", fmt.Errorf("%s が %s 以内に終わりませんでした", name, timeout)
 		}
 		return "", fmt.Errorf("%s %s: %s", name, args[0], strings.TrimSpace(stderr.String()))
 	}

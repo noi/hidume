@@ -11,6 +11,8 @@ import (
 type config struct {
 	// 最後に開いたリポジトリのルート
 	Repository string `json:"repository"`
+	// 最後に clone したときの置き場所（clone したリポジトリの親フォルダー）
+	CloneDirectory string `json:"cloneDirectory,omitempty"`
 	// 作業履歴。開いたディレクトリ（ワークツリーも 1 つずつ）を、最近使った順に並べる
 	History []string `json:"history,omitempty"`
 	// ディレクトリごとの Claude Code のセッション ID（ディレクトリとセッションは 1 対 1）
